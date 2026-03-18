@@ -196,10 +196,9 @@ export async function analyseWallet(
   let slippageCache: SlippageCache = {}
 
   await Promise.all([
-    // 4: 1-min candles for every perp coin
+    // 4: 1-min candles for every coin (including spot — Hyperliquid candleSnapshot accepts @N tickers)
     Promise.allSettled(
       Array.from(coinGroups.entries())
-        .filter(([coin]) => isPerpCoin(coin))
         .map(async ([coin, coinFills]) => {
           const times = coinFills.map((f) => f.time)
           const minT = arrayMin(times)
@@ -294,13 +293,16 @@ function computeTradeMetrics(
   const cMap = candleMaps.get(fill.coin)
   if (cMap) {
     const snapped = snapToMinute(fill.time)
-    const candleAtTrade = cMap.get(snapped)
+    // Try exact minute, then ±1 min as fallback for boundary-edge fills
+    const candleAtTrade =
+      cMap.get(snapped) ?? cMap.get(snapped - 60_000) ?? cMap.get(snapped + 60_000)
     if (candleAtTrade) {
       midAtTrade = candleMid(candleAtTrade)
       candleOpen = parseFloat(candleAtTrade.o)
     }
     const snapped5 = snapToMinute(fill.time + 5 * 60_000)
-    const candle5 = cMap.get(snapped5)
+    const candle5 =
+      cMap.get(snapped5) ?? cMap.get(snapped5 - 60_000) ?? cMap.get(snapped5 + 60_000)
     if (candle5) midPlus5 = candleMid(candle5)
   }
 

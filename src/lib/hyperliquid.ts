@@ -85,8 +85,7 @@ export async function getCandlesFull(
     const chunkEnd = Math.min(cursor + step, endTime)
     const candles = await getCandles(coin, cursor, chunkEnd, interval)
     chunks.push(...candles)
-    if (candles.length === 0) break
-    cursor = chunkEnd + 1
+    cursor = chunkEnd + 1 // always advance — a single empty chunk must not abort the whole range
   }
   return chunks
 }

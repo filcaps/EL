@@ -135,11 +135,11 @@ function TradeRow({
           <span className="tag-sell">SELL</span>
         )}
       </td>
-      <td className="td">
+      <td className="td font-mono text-xs">
         {t.isTaker ? (
-          <span className="tag-taker">TAKER</span>
+          <span className="text-text-secondary">Taker</span>
         ) : (
-          <span className="tag-maker">MAKER</span>
+          <span className="text-text-muted">Maker</span>
         )}
       </td>
       <td className="td text-right">
