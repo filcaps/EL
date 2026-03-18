@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    background-color: #080B12;
+    color: #E2EAF4;
+  }
+
+  body {
+    margin: 0;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: #080B12;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #0D1117;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #1E2A3A;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2A3A50;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface-2 border border-border rounded-lg;
+  }
+
+  .card-header {
+    @apply px-5 py-4 border-b border-border flex items-center justify-between;
+  }
+
+  .card-title {
+    @apply text-xs font-semibold uppercase tracking-widest text-text-secondary;
+  }
+
+  .metric-value {
+    @apply font-mono text-lg font-semibold text-text-primary;
+  }
+
+  .metric-label {
+    @apply text-xs text-text-secondary uppercase tracking-wide;
+  }
+
+  .tag {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium;
+  }
+
+  .tag-buy {
+    @apply tag bg-pos-dim text-pos-bright;
+  }
+
+  .tag-sell {
+    @apply tag bg-neg-dim text-neg-bright;
+  }
+
+  .tag-taker {
+    @apply tag bg-warn-dim text-warn;
+  }
+
+  .tag-maker {
+    @apply tag bg-surface-4 text-text-secondary;
+  }
+
+  .table-row-hover {
+    @apply hover:bg-surface-3 transition-colors duration-100 cursor-pointer;
+  }
+
+  .th {
+    @apply text-left text-xs font-semibold uppercase tracking-wider text-text-muted px-3 py-3 border-b border-border;
+  }
+
+  .td {
+    @apply px-3 py-3 text-sm font-mono text-text-secondary border-b border-border-subtle;
+  }
+
+  .td-primary {
+    @apply px-3 py-3 text-sm font-mono text-text-primary border-b border-border-subtle;
+  }
+
+  .btn-primary {
+    @apply px-5 py-2.5 bg-accent-blue hover:bg-accent-blue-dim text-white text-sm font-medium rounded-lg transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 text-text-secondary hover:text-text-primary hover:bg-surface-3 text-sm font-medium rounded-lg transition-colors duration-150;
+  }
+
+  .input {
+    @apply bg-surface-3 border border-border rounded-lg px-4 py-2.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent-blue transition-colors;
+  }
+}
+
+/* Recharts dark theme overrides */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #1E2A3A;
+}
+
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #121820 !important;
+  border: 1px solid #1E2A3A !important;
+  border-radius: 6px !important;
+}
+
+.recharts-legend-item-text {
+  color: #8CA0BE !important;
+}
