@@ -1,4 +1,4 @@
-import { Activity } from 'lucide-react'
+const QUOTE_OF_THE_DAY = '"The only journey is the one within." — RAINER MARIA RILKE'
 
 interface HeaderProps {
   onReset?: () => void
@@ -7,38 +7,55 @@ interface HeaderProps {
 
 export function Header({ onReset, walletAddress }: HeaderProps) {
   return (
-    <header className="border-b border-border bg-surface-1 sticky top-0 z-50">
-      <div className="max-w-screen-2xl mx-auto px-6 h-14 flex items-center justify-between">
-        {/* Logo */}
-        <button
-          onClick={onReset}
-          className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
-        >
-          <div className="w-7 h-7 bg-accent-blue rounded flex items-center justify-center">
-            <Activity className="w-4 h-4 text-white" />
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-sm font-bold tracking-tight text-text-primary">ExecLoss</span>
-            <span className="text-xs text-text-muted font-mono">v0.1</span>
-          </div>
-        </button>
+    <header className="border-b border-border bg-surface-0 sticky top-0 z-50">
+      <div className="max-w-screen-2xl mx-auto px-6 h-14 flex items-center justify-between gap-4">
 
-        {/* Center label */}
-        <div className="hidden md:flex items-center gap-2 text-xs text-text-muted">
-          <span className="w-1.5 h-1.5 rounded-full bg-pos animate-pulse" />
-          Hyperliquid Execution Analytics
+        {/* Left: logo + nav */}
+        <div className="flex items-center gap-6 shrink-0">
+          <button
+            onClick={onReset}
+            className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
+          >
+            {/* Blue circle Q logo */}
+            <div className="w-7 h-7 bg-accent-blue rounded-full flex items-center justify-center">
+              <span className="text-white text-xs font-bold leading-none">Q</span>
+            </div>
+            <span className="text-sm font-semibold text-text-primary tracking-tight">Quote</span>
+          </button>
+
+          <nav className="flex items-center gap-5">
+            <span className="text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
+              Trade
+            </span>
+            <span className="text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
+              Portfolio
+            </span>
+          </nav>
         </div>
 
-        {/* Right: wallet pill */}
-        {walletAddress && (
-          <div className="flex items-center gap-2">
-            <div className="px-3 py-1.5 bg-surface-3 border border-border rounded-lg">
+        {/* Center: italic quote */}
+        <div className="hidden lg:block flex-1 text-center">
+          <span className="text-xs italic text-text-muted tracking-wide">{QUOTE_OF_THE_DAY}</span>
+        </div>
+
+        {/* Right: wallet pill or Connect Wallet */}
+        <div className="shrink-0">
+          {walletAddress ? (
+            <button
+              onClick={onReset}
+              className="px-4 py-1.5 bg-surface-3 border border-border rounded-lg hover:border-border-bright transition-colors"
+            >
               <span className="font-mono text-xs text-text-secondary">
                 {walletAddress.slice(0, 6)}…{walletAddress.slice(-4)}
               </span>
-            </div>
-          </div>
-        )}
+            </button>
+          ) : (
+            <button className="px-4 py-1.5 border border-border rounded-lg text-xs text-text-secondary hover:border-border-bright hover:text-text-primary transition-colors">
+              Connect Wallet
+            </button>
+          )}
+        </div>
+
       </div>
     </header>
   )

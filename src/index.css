@@ -8,8 +8,8 @@
   }
 
   html {
-    background-color: #080B12;
-    color: #E2EAF4;
+    background-color: #000000;
+    color: #ffffff;
   }
 
   body {
@@ -17,7 +17,7 @@
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: #080B12;
+    background-color: #000000;
   }
 
   ::-webkit-scrollbar {
@@ -26,16 +26,16 @@
   }
 
   ::-webkit-scrollbar-track {
-    background: #0D1117;
+    background: #0a0a0a;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #1E2A3A;
+    background: #1f1f1f;
     border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #2A3A50;
+    background: #2a2a2a;
   }
 }
 
@@ -112,15 +112,15 @@
 /* Recharts dark theme overrides */
 .recharts-cartesian-grid-horizontal line,
 .recharts-cartesian-grid-vertical line {
-  stroke: #1E2A3A;
+  stroke: #1f1f1f;
 }
 
 .recharts-tooltip-wrapper .recharts-default-tooltip {
-  background-color: #121820 !important;
-  border: 1px solid #1E2A3A !important;
+  background-color: #111111 !important;
+  border: 1px solid #1f1f1f !important;
   border-radius: 6px !important;
 }
 
 .recharts-legend-item-text {
-  color: #8CA0BE !important;
+  color: #888888 !important;
 }

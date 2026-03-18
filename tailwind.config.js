@@ -4,23 +4,24 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Quote UI palette — true black base
         surface: {
-          0: '#080B12',
-          1: '#0D1117',
-          2: '#121820',
-          3: '#182030',
-          4: '#1E2840',
+          0: '#000000',
+          1: '#0a0a0a',
+          2: '#111111',
+          3: '#161616',
+          4: '#1c1c1c',
         },
         border: {
-          DEFAULT: '#1E2A3A',
-          subtle: '#141E2E',
-          bright: '#2A3A50',
+          DEFAULT: '#1f1f1f',
+          subtle: '#141414',
+          bright: '#2a2a2a',
         },
         text: {
-          primary: '#E2EAF4',
-          secondary: '#8CA0BE',
-          muted: '#4A5A72',
-          dim: '#2E3C52',
+          primary: '#ffffff',
+          secondary: '#888888',
+          muted: '#555555',
+          dim: '#333333',
         },
         accent: {
           blue: '#3B82F6',
@@ -29,18 +30,18 @@ export default {
           purple: '#8B5CF6',
         },
         pos: {
-          DEFAULT: '#10B981',
-          dim: '#064E3B',
-          bright: '#34D399',
+          DEFAULT: '#22c55e',
+          dim: '#052e16',
+          bright: '#4ade80',
         },
         neg: {
-          DEFAULT: '#EF4444',
-          dim: '#450A0A',
-          bright: '#F87171',
+          DEFAULT: '#ef4444',
+          dim: '#1f0707',
+          bright: '#f87171',
         },
         warn: {
-          DEFAULT: '#F59E0B',
-          dim: '#451A03',
+          DEFAULT: '#f59e0b',
+          dim: '#1f1000',
         },
       },
       fontFamily: {
