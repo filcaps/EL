@@ -25,7 +25,7 @@ async function post<T>(type: string, extra: Record<string, unknown> = {}): Promi
 // ─── Fills ────────────────────────────────────────────────────────────────────
 
 export async function getUserFills(address: string): Promise<HLFill[]> {
-  return post<HLFill[]>('userFills', { user: address })
+  return post<HLFill[]>('userFills', { user: address.toLowerCase() })
 }
 
 export async function getUserFillsByTime(
@@ -33,7 +33,7 @@ export async function getUserFillsByTime(
   startTime: number,
   endTime?: number,
 ): Promise<HLFill[]> {
-  const extra: Record<string, unknown> = { user: address, startTime }
+  const extra: Record<string, unknown> = { user: address.toLowerCase(), startTime }
   if (endTime !== undefined) extra.endTime = endTime
   return post<HLFill[]>('userFillsByTime', extra)
 }
@@ -41,7 +41,7 @@ export async function getUserFillsByTime(
 // ─── Historical orders (for cancel/trade ratio) ───────────────────────────────
 
 export async function getHistoricalOrders(address: string): Promise<HLHistoricalOrder[]> {
-  return post<HLHistoricalOrder[]>('historicalOrders', { user: address })
+  return post<HLHistoricalOrder[]>('historicalOrders', { user: address.toLowerCase() })
 }
 
 // ─── Candles (1-min OHLCV for mid-price estimation) ──────────────────────────

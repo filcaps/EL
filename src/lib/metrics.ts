@@ -127,9 +127,11 @@ export interface AnalysisProgress {
 }
 
 export async function analyseWallet(
-  address: string,
+  rawAddress: string,
   onProgress?: (p: AnalysisProgress) => void,
 ): Promise<WalletSummary> {
+  // Normalize to lowercase — Hyperliquid's API rejects checksummed addresses with 422
+  const address = rawAddress.toLowerCase()
   const progress = (stage: string, detail?: string) =>
     onProgress?.({ stage, detail })
 
