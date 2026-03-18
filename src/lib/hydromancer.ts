@@ -1,20 +1,17 @@
 import type { HMSlippagePoint } from '../types'
 
-// In dev, route through the Vite proxy to avoid CORS preflight rejection on the Authorization header
-const BASE = import.meta.env.DEV ? '/api/hydromancer' : 'https://api.hydromancer.xyz'
-const API_KEY = import.meta.env.VITE_HYDROMANCER_API_KEY as string
+// Always route through /api/hydromancer — the Vite proxy handles this in dev,
+// and the Vercel serverless function handles it in production (keeping the API key server-side).
+const BASE = '/api/hydromancer'
 
 // Supported notional tiers (USD)
 export const NOTIONAL_TIERS = [1_000, 5_000, 10_000, 30_000, 50_000, 100_000, 250_000, 500_000, 1_000_000] as const
 export type NotionalTier = (typeof NOTIONAL_TIERS)[number]
 
 async function post<T>(body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${BASE}/info`, {
+  const res = await fetch(BASE, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${API_KEY}`,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   if (!res.ok) {

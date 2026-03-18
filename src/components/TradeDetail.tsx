@@ -106,7 +106,7 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
               <KV label="Fill Price" value={`$${t.fillPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`} mono />
               <KV label="Size" value={`${t.size.toFixed(6)} ${t.coinDisplay}`} mono />
               <KV label="Notional" value={fmtUsd(t.notionalUsd)} mono />
-              <KV label="Fee" value={`${fmtUsd(t.fee)} ${t.feeToken}`} mono warn />
+              <KV label="Fee" value={`${fmtUsd(t.fee)} ${t.feeToken}`} mono />
               <KV
                 label="Closed PnL"
                 value={`${t.closedPnl >= 0 ? '+' : ''}${fmtUsd(t.closedPnl)}`}

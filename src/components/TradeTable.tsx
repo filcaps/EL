@@ -354,7 +354,7 @@ function TradeRow({
         {/* Market impact beyond spread for sells */}
         {fmtBps(sellImpact(t))}
       </td>
-      <td className="td text-right text-warn">{fmtUsd(t.fee)}</td>
+      <td className="td text-right text-text-muted">{fmtUsd(t.fee)}</td>
       <td className="td text-right">
         <ChevronRight className="w-3.5 h-3.5 text-text-muted ml-auto" />
       </td>
