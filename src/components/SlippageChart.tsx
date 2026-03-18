@@ -109,16 +109,16 @@ export function SlippageChart({
         ) : (
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1E2A3A" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" />
               <XAxis
                 dataKey="time"
                 tickFormatter={(v) => format(new Date(v), 'MMM d')}
-                tick={{ fontSize: 10, fill: '#4A5A72' }}
-                axisLine={{ stroke: '#1E2A3A' }}
+                tick={{ fontSize: 10, fill: '#555555' }}
+                axisLine={{ stroke: '#1f1f1f' }}
                 tickLine={false}
               />
               <YAxis
-                tick={{ fontSize: 10, fill: '#4A5A72' }}
+                tick={{ fontSize: 10, fill: '#555555' }}
                 axisLine={false}
                 tickLine={false}
                 tickFormatter={(v) => `${v} bps`}
@@ -126,12 +126,12 @@ export function SlippageChart({
               />
               <Tooltip
                 content={<CustomTooltip />}
-                cursor={{ stroke: '#2A3A50', strokeWidth: 1 }}
+                cursor={{ stroke: '#2a2a2a', strokeWidth: 1 }}
               />
               <Legend
-                wrapperStyle={{ fontSize: 11, color: '#8CA0BE', paddingTop: 8 }}
+                wrapperStyle={{ fontSize: 11, color: '#888888', paddingTop: 8 }}
               />
-              <ReferenceLine y={0} stroke="#2A3A50" strokeDasharray="4 4" />
+              <ReferenceLine y={0} stroke="#2a2a2a" strokeDasharray="4 4" />
               <Line
                 type="monotone"
                 dataKey="buyBps"
