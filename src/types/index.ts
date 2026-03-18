@@ -125,26 +125,30 @@ export interface TradeExecutionMetrics {
   // ── execution cost breakdown (all in bps) ────────────────────────────────
   feeBps: number
 
+  // ── Raw Hydromancer fields (direct from slippageHistory API) ─────────────
   /**
-   * From Hydromancer slippageHistory (or live book fallback).
-   * halfSpreadBps: half of the quoted spread at the time of the trade.
-   * This is the MINIMUM crossing cost for any taker — it is a component of
-   * slippageBps, not a separate additive item.
+   * Half of the quoted bid-ask spread at the time of the trade, in bps.
+   * Source: Hydromancer halfSpreadBps field.
    */
   halfSpreadBps: number | null
 
   /**
-   * Total one-way execution cost from mid, in bps.
-   * For TAKERS: halfSpreadBps + additionalImpactBps (= Hydromancer buy/sellSlippageBps).
-   * Null for MAKERS (they receive the spread, not pay it).
+   * Estimated buy slippage in bps at the trade notional.
+   * Source: Hydromancer buySlippageBps field. Null if insufficient liquidity.
    */
-  slippageBps: number | null
+  rawBuySlippageBps: number | null
 
   /**
-   * Pure market impact beyond the quoted spread:
-   *   additionalImpactBps = max(0, slippageBps - halfSpreadBps)
-   * Zero for small trades that fill at best bid/ask with no book walking.
+   * Estimated sell slippage in bps at the trade notional.
+   * Source: Hydromancer sellSlippageBps field. Null if insufficient liquidity.
    */
+  rawSellSlippageBps: number | null
+
+  // ── Derived fields (kept for summary-level aggregation) ──────────────────
+  /**
+   * Directional slippage for this trade (buy fills → rawBuySlippageBps, sell → rawSellSlippageBps).
+   */
+  slippageBps: number | null
   additionalImpactBps: number | null
 
   // Computed from 1-min candle OHLCV

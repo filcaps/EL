@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { format } from 'date-fns'
-import { X, ExternalLink, RefreshCw } from 'lucide-react'
+import { X, ExternalLink, RefreshCw, Copy, Check } from 'lucide-react'
 import type { TradeExecutionMetrics, OrderBookMetrics } from '../types'
 import { fmtBps, fmtUsd, bpsColorClass, fetchOrderBookMetrics } from '../lib/metrics'
 import { getMetaAndAssetCtxs, buildCoinIndex } from '../lib/hyperliquid'
@@ -14,6 +14,18 @@ interface TradeDetailProps {
 export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
   const [obMetrics, setObMetrics] = useState<OrderBookMetrics | null>(null)
   const [obLoading, setObLoading] = useState(true)
+  const [copied, setCopied] = useState(false)
+
+  const isZeroHash = /^0x0+$/.test(t.hash)
+  const displayHash = isZeroHash ? null : t.hash
+
+  function copyHash() {
+    const text = displayHash ?? String(t.tid)
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
 
   useEffect(() => {
     setObLoading(true)
@@ -50,11 +62,23 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
       <div className="relative w-full max-w-2xl h-full bg-surface-1 border-l border-border overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-surface-1 border-b border-border px-6 py-4 flex items-center justify-between z-10">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-text-primary">Trade Detail</span>
-            <span className="font-mono text-xs text-text-muted">{t.hash.slice(0, 10)}…</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-sm font-semibold text-text-primary shrink-0">Trade Detail</span>
+            <button
+              onClick={copyHash}
+              className="flex items-center gap-1.5 group min-w-0"
+              title="Copy transaction hash"
+            >
+              <span className="font-mono text-xs text-text-muted truncate max-w-[220px]">
+                {displayHash ?? `TID: ${t.tid}`}
+              </span>
+              {copied
+                ? <Check className="w-3 h-3 text-pos shrink-0" />
+                : <Copy className="w-3 h-3 text-text-dim opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              }
+            </button>
           </div>
-          <button onClick={onClose} className="btn-ghost p-1.5">
+          <button onClick={onClose} className="btn-ghost p-1.5 shrink-0">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -93,110 +117,37 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
             </div>
           </div>
 
-          {/* Execution cost breakdown */}
+          {/* Hydromancer liquidity data */}
           <section>
-            <h3 className="card-title mb-3">Execution Cost Breakdown</h3>
-            <div className="card divide-y divide-border">
-              {t.isTaker ? (
-                <>
-                  {/* Taker: halfSpread + additionalImpact = total slippage + fees */}
-                  <CostRow
-                    label="Half-Spread (crossing cost)"
-                    desc="Minimum cost to cross from mid to best bid/ask. Embedded in total slippage below."
-                    bps={t.halfSpreadBps}
-                    source={sourceLabel}
-                    dimmed
-                  />
-                  <CostRow
-                    label="Additional Market Impact"
-                    desc="Price walking beyond best bid/ask due to order size."
-                    bps={t.additionalImpactBps}
-                  />
-                  <CostRow
-                    label="Total Slippage (spread + impact)"
-                    desc={`One-way cost from mid. = half-spread + market impact. Source: ${sourceLabel}.`}
-                    bps={t.slippageBps}
-                    subtotal
-                  />
-                  <CostRow
-                    label="Exchange Fees"
-                    desc="Taker fee charged by Hyperliquid"
-                    bps={t.feeBps}
-                    alwaysShow
-                  />
-                  <CostRow
-                    label="Total Execution Cost"
-                    desc="Total slippage + fees"
-                    bps={t.totalCostBps}
-                    total
-                  />
-                </>
-              ) : (
-                <>
-                  {/* Maker: earns the spread, pays lower fees */}
-                  <CostRow
-                    label="Spread Rebate (earned)"
-                    desc="Maker posts a resting order and earns the half-spread when filled."
-                    bps={t.halfSpreadBps !== null ? -t.halfSpreadBps : null}
-                    source={sourceLabel}
-                    positiveIsBad={false}
-                  />
-                  <CostRow
-                    label="Exchange Fees"
-                    desc="Maker fee charged by Hyperliquid (usually lower than taker)"
-                    bps={t.feeBps}
-                    alwaysShow
-                  />
-                  <CostRow
-                    label="Total Execution Cost"
-                    desc="Fees minus spread rebate (negative = net saving vs taker)"
-                    bps={t.totalCostBps}
-                    total
-                    positiveIsBad={false}
-                  />
-                </>
-              )}
-            </div>
-          </section>
-
-          {/* Price-based metrics */}
-          <section>
-            <h3 className="card-title mb-3">Price-Based Metrics (from candle data)</h3>
+            <h3 className="card-title mb-3">Liquidity at Execution · Hydromancer</h3>
             <div className="card divide-y divide-border">
               <CostRow
-                label="Effective Spread"
-                desc="2 × |fill − mid| / mid. Mid estimated from 1-min candle (H+L)/2. Approximation: candle mid ≠ tick mid."
-                bps={t.effectiveSpreadBps}
-                source={
-                  t.midPriceAtExecution !== null
-                    ? `Candle mid: $${t.midPriceAtExecution.toLocaleString(undefined, { maximumFractionDigits: 4 })}`
-                    : 'No candle data available'
-                }
+                label="Bid-Ask Spread"
+                desc="Full quoted spread (2 × halfSpread) at the time of this trade. The baseline cost for any taker to cross the book."
+                bps={t.halfSpreadBps !== null ? t.halfSpreadBps * 2 : null}
+                source={sourceLabel}
               />
               <CostRow
-                label="Realized Spread (price impact persistence)"
-                desc={
-                  t.isTaker
-                    ? `Taker view: negative = price moved in your favour after execution (${t.side === 'buy' ? 'rose' : 'fell'}). Positive = adverse selection.`
-                    : `2 × side × (fill − mid+5min) / mid. Negative = favourable post-trade drift.`
-                }
-                bps={t.realizedSpreadBps}
-                source={
-                  t.midPricePlus5Min !== null
-                    ? `Mid +5 min: $${t.midPricePlus5Min.toLocaleString(undefined, { maximumFractionDigits: 4 })}`
-                    : 'Mid+5 unavailable'
-                }
-                positiveIsBad
+                label="Buy Market Impact"
+                desc="Extra cost above the spread for a buy at this notional. Zero for small orders that fill entirely at best ask; positive when the order walks the book."
+                bps={t.rawBuySlippageBps !== null && t.halfSpreadBps !== null
+                  ? Math.max(0, t.rawBuySlippageBps - t.halfSpreadBps)
+                  : null}
+                source={sourceLabel}
               />
               <CostRow
-                label="Arrival Cost (Implementation Shortfall)"
-                desc="side × (fill − candle open) / candle open. Proxy for execution vs decision price. Note: arrival snaps to candle boundary."
-                bps={t.arrivalCostBps}
-                source={
-                  t.candleOpen !== null
-                    ? `Arrival proxy (candle open): $${t.candleOpen.toLocaleString(undefined, { maximumFractionDigits: 4 })}`
-                    : 'Arrival price unavailable'
-                }
+                label="Sell Market Impact"
+                desc="Extra cost above the spread for a sell at this notional. Zero for small orders; positive when the order walks the book."
+                bps={t.rawSellSlippageBps !== null && t.halfSpreadBps !== null
+                  ? Math.max(0, t.rawSellSlippageBps - t.halfSpreadBps)
+                  : null}
+                source={sourceLabel}
+              />
+              <CostRow
+                label="Exchange Fee"
+                desc={t.isTaker ? 'Taker fee charged by Hyperliquid' : 'Maker fee charged by Hyperliquid'}
+                bps={t.feeBps}
+                alwaysShow
               />
             </div>
           </section>
@@ -211,15 +162,17 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
           </section>
 
           {/* Explorer link */}
-          <a
-            href={`https://app.hyperliquid.xyz/explorer/tx/${t.hash}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 text-xs text-accent-blue hover:text-accent-blue/80 transition-colors"
-          >
-            <ExternalLink className="w-3.5 h-3.5" />
-            View on Hyperliquid Explorer
-          </a>
+          {displayHash && (
+            <a
+              href={`https://app.hyperliquid.xyz/explorer/tx/${displayHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-xs text-accent-blue hover:text-accent-blue/80 transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              View on Hyperliquid Explorer
+            </a>
+          )}
         </div>
       </div>
     </div>

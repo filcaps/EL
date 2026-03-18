@@ -84,7 +84,7 @@ export async function getCandlesFull(
   while (cursor < endTime) {
     const chunkEnd = Math.min(cursor + step, endTime)
     const candles = await getCandles(coin, cursor, chunkEnd, interval)
-    chunks.push(...candles)
+    if (candles) chunks.push(...candles)
     cursor = chunkEnd + 1 // always advance — a single empty chunk must not abort the whole range
   }
   return chunks
@@ -107,7 +107,7 @@ export async function getMetaAndAssetCtxs(): Promise<[HLMeta, HLAssetContext[]]>
 export async function getSpotMetaAndAssetCtxs(): Promise<
   [{
     tokens: Array<{ name: string; index: number; tokenId: string; szDecimals: number }>
-    universe: Array<{ name: string; index: number; tokens: number[] }>
+    universe: Array<{ name: string; index: number; tokens: number[]; isCanonical: boolean }>
   }, unknown[]]
 > {
   return post('spotMetaAndAssetCtxs')

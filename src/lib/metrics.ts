@@ -153,7 +153,8 @@ export async function analyseWallet(
   let historicalOrders: HLHistoricalOrder[] = []
   let metaMap = new Map<string, number>()
   let assetCtxs: HLAssetContext[] = []
-  const spotCoinNames = new Map<string, string>() // maps "@N" → token name
+  const spotCoinNames = new Map<string, string>()    // "@N" → human-readable name
+  const spotCandleTickers = new Map<string, string>() // "@N" → ticker for candleSnapshot API
 
   await Promise.allSettled([
     getHistoricalOrders(address).then((o) => { historicalOrders = o }).catch(() => {}),
@@ -166,17 +167,24 @@ export async function analyseWallet(
       const tokenNames = new Map<number, string>()
       for (const token of spotMeta.tokens) tokenNames.set(token.index, token.name)
 
-      // @N in fills = universe[N].index — resolve display name from the market entry
+      // @N in fills = universe[N].index — resolve display name + candle ticker
       for (const market of spotMeta.universe) {
-        let displayName: string
-        if (market.name.startsWith('@')) {
-          // Non-canonical market: name is "@N" — look up base token (tokens[0]) by its index
-          displayName = tokenNames.get(market.tokens[0]) ?? market.name
+        const fillKey = `@${market.index}`
+
+        if (market.isCanonical) {
+          // Canonical market like "PURR/USDC":
+          //   display name = base ticker ("PURR")
+          //   candle API needs the base ticker too — "@N" returns null for canonical markets
+          const baseTicker = market.name.split('/')[0]
+          spotCoinNames.set(fillKey, baseTicker)
+          spotCandleTickers.set(fillKey, baseTicker)
         } else {
-          // Canonical market like "PURR/USDC" — take the base ticker before '/'
-          displayName = market.name.split('/')[0]
+          // Non-canonical market: name is "@N" — look up base token (tokens[0]) by its index
+          const displayName = tokenNames.get(market.tokens[0]) ?? market.name
+          spotCoinNames.set(fillKey, displayName)
+          // Non-canonical coins use "@N" notation in candleSnapshot (works fine)
+          spotCandleTickers.set(fillKey, fillKey)
         }
-        spotCoinNames.set(`@${market.index}`, displayName)
       }
     }).catch(() => {}),
   ])
@@ -209,17 +217,23 @@ export async function analyseWallet(
   let slippageCache: SlippageCache = {}
 
   await Promise.all([
-    // 4: 1-min candles for every coin (including spot — Hyperliquid candleSnapshot accepts @N tickers)
+    // 4: 1-min candles for every coin.
+    //    Spot coins: canonical markets (e.g. PURR/USDC = @0) need their base ticker ("PURR")
+    //    because the candleSnapshot API returns null for "@N" notation on canonical markets.
+    //    Non-canonical spot markets ("@1", "@2", ...) work fine with "@N" directly.
     Promise.allSettled(
       Array.from(coinGroups.entries())
         .map(async ([coin, coinFills]) => {
           const times = coinFills.map((f) => f.time)
           const minT = arrayMin(times)
           const maxT = arrayMax(times)
+          // Resolve the correct ticker for the candle API
+          const candleTicker = spotCandleTickers.get(coin) ?? coin
           try {
             progress('Loading candles…', coin)
-            // Buffer: 2 min before earliest fill, 10 min after latest (covers +5 min realized spread)
-            const candles = await getCandlesFull(coin, minT - 120_000, maxT + 600_000)
+            // Buffer: 10 min before earliest fill, 30 min after latest (covers +5 min realized spread + edge cases)
+            const candles = await getCandlesFull(candleTicker, minT - 600_000, maxT + 1_800_000)
+            // Store under original fill coin key so computeTradeMetrics can look it up
             candleMaps.set(coin, buildCandleMap(candles))
           } catch {
             // non-fatal: price-based metrics will be null for this coin
@@ -281,6 +295,28 @@ export async function analyseWallet(
   return summary
 }
 
+// ─── Candle lookup helpers ────────────────────────────────────────────────────
+
+/**
+ * Find the nearest 1-min candle to `snappedMs` within ±`maxMinutes` minutes.
+ * Scans outward from the target in 1-min steps, checking both directions.
+ */
+function findNearestCandle(
+  cMap: Map<number, HLCandle>,
+  snappedMs: number,
+  maxMinutes: number,
+): HLCandle | null {
+  for (let step = 0; step <= maxMinutes; step++) {
+    const earlier = cMap.get(snappedMs - step * 60_000)
+    if (earlier) return earlier
+    if (step > 0) {
+      const later = cMap.get(snappedMs + step * 60_000)
+      if (later) return later
+    }
+  }
+  return null
+}
+
 // ─── Single-trade metrics ─────────────────────────────────────────────────────
 
 function computeTradeMetrics(
@@ -306,21 +342,20 @@ function computeTradeMetrics(
   const cMap = candleMaps.get(fill.coin)
   if (cMap) {
     const snapped = snapToMinute(fill.time)
-    // Try exact minute, then ±1 min as fallback for boundary-edge fills
-    const candleAtTrade =
-      cMap.get(snapped) ?? cMap.get(snapped - 60_000) ?? cMap.get(snapped + 60_000)
+    const candleAtTrade = findNearestCandle(cMap, snapped, 10)
     if (candleAtTrade) {
       midAtTrade = candleMid(candleAtTrade)
       candleOpen = parseFloat(candleAtTrade.o)
     }
     const snapped5 = snapToMinute(fill.time + 5 * 60_000)
-    const candle5 =
-      cMap.get(snapped5) ?? cMap.get(snapped5 - 60_000) ?? cMap.get(snapped5 + 60_000)
+    const candle5 = findNearestCandle(cMap, snapped5, 10)
     if (candle5) midPlus5 = candleMid(candle5)
   }
 
   // ── Slippage & spread from Hydromancer (fix #2, #3) ─────────────────────
   let halfSpreadBps: number | null = null
+  let rawBuySlippageBps: number | null = null
+  let rawSellSlippageBps: number | null = null
   let slippageBps: number | null = null
   let additionalImpactBps: number | null = null
   let slippageSource: TradeExecutionMetrics['slippageSource'] = 'unavailable'
@@ -334,11 +369,12 @@ function computeTradeMetrics(
     if (nearest) {
       slippageSource = 'hydromancer'
       halfSpreadBps = nearest.halfSpreadBps
+      rawBuySlippageBps = nearest.buySlippageBps ?? null
+      rawSellSlippageBps = nearest.sellSlippageBps ?? null
 
       if (isTaker) {
-        // Hydromancer slippage = total one-way cost from mid (halfSpread already included)
-        const rawSlip = side === 'buy' ? nearest.buySlippageBps : nearest.sellSlippageBps
-        slippageBps = rawSlip ?? null
+        // Directional slippage for this trade side
+        slippageBps = side === 'buy' ? rawBuySlippageBps : rawSellSlippageBps
         additionalImpactBps =
           slippageBps !== null
             ? Math.max(0, slippageBps - nearest.halfSpreadBps)
@@ -419,6 +455,8 @@ function computeTradeMetrics(
     candleOpen,
     feeBps: fBps,
     halfSpreadBps,
+    rawBuySlippageBps,
+    rawSellSlippageBps,
     slippageBps,
     additionalImpactBps,
     effectiveSpreadBps: effSpread,

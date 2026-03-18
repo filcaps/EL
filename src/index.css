@@ -109,6 +109,33 @@
   }
 }
 
+/* Dual-thumb range slider */
+.range-thumb {
+  pointer-events: none;
+  height: 20px;
+}
+.range-thumb::-webkit-slider-thumb {
+  pointer-events: all;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3b82f6;
+  border: 2px solid #000;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+}
+.range-thumb::-moz-range-thumb {
+  pointer-events: all;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3b82f6;
+  border: 2px solid #000;
+  cursor: pointer;
+}
+
 /* Recharts dark theme overrides */
 .recharts-cartesian-grid-horizontal line,
 .recharts-cartesian-grid-vertical line {
