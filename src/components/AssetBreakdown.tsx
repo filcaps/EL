@@ -46,7 +46,7 @@ export function AssetBreakdown({ assets, onSelectAsset }: AssetBreakdownProps) {
                   className="table-row-hover"
                   onClick={() => onSelectAsset?.(a.coin)}
                 >
-                  <td className="td-primary font-semibold">{a.coin}</td>
+                  <td className="td-primary font-semibold">{a.displayName}</td>
                   <td className="td text-right">{a.totalTrades}</td>
                   <td className="td text-right">{fmtUsd(a.totalVolumeUsd)}</td>
                   <td className="td text-right text-text-muted">

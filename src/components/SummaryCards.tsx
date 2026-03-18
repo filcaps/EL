@@ -1,4 +1,4 @@
-import { TrendingDown, TrendingUp, DollarSign, Activity, RefreshCw, Info } from 'lucide-react'
+import { TrendingDown, TrendingUp, DollarSign, Activity, RefreshCw, Info, Zap } from 'lucide-react'
 import type { WalletSummary } from '../types'
 import { fmtBps, fmtUsd, bpsColorClass } from '../lib/metrics'
 
@@ -115,6 +115,56 @@ export function CancelTradeRatioCard({ ctr }: CancelTradeRatioCardProps) {
             High CTR may indicate algo strategies or quote-stuffing during volatile periods.
           </p>
         )}
+      </div>
+    </div>
+  )
+}
+
+interface TotalCostCardProps {
+  summary: WalletSummary
+}
+
+export function TotalCostCard({ summary }: TotalCostCardProps) {
+  const totalCostUsd = summary.estimatedTotalCostUsd
+  const feesUsd = summary.totalFeesUsd
+  const slippageCostUsd = totalCostUsd !== null ? totalCostUsd - feesUsd : null
+
+  return (
+    <div className="card p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <Zap className="w-4 h-4 text-accent-blue" />
+        <span className="card-title">Total Execution Cost</span>
+        <span className="text-xs text-text-muted ml-auto">fees + slippage · estimated</span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div>
+          <div className="text-xs text-text-muted mb-1">Fees Paid</div>
+          <div className="font-mono text-xl font-semibold text-warn">{fmtUsd(feesUsd)}</div>
+          <div className="text-xs text-text-muted mt-0.5">
+            {fmtBps((feesUsd / Math.max(summary.totalVolumeUsd, 1)) * 10_000)} avg
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs text-text-muted mb-1">Est. Slippage Cost</div>
+          <div className={`font-mono text-xl font-semibold ${slippageCostUsd !== null ? bpsColorClass(summary.avgSlippageBps) : 'text-text-muted'}`}>
+            {slippageCostUsd !== null ? fmtUsd(slippageCostUsd) : '—'}
+          </div>
+          <div className="text-xs text-text-muted mt-0.5">
+            {fmtBps(summary.avgSlippageBps)} avg
+          </div>
+        </div>
+
+        <div className="border-l border-border pl-4">
+          <div className="text-xs text-text-muted mb-1">Total</div>
+          <div className={`font-mono text-2xl font-bold ${totalCostUsd !== null ? bpsColorClass(summary.avgTotalCostBps) : 'text-text-muted'}`}>
+            {totalCostUsd !== null ? fmtUsd(totalCostUsd) : '—'}
+          </div>
+          <div className="text-xs text-text-muted mt-0.5">
+            {fmtBps(summary.avgTotalCostBps)} avg · across {summary.totalTrades.toLocaleString()} trades
+          </div>
+        </div>
       </div>
     </div>
   )

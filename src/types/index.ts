@@ -102,7 +102,8 @@ export interface TradeExecutionMetrics {
   tid: number
   oid: number
   hash: string
-  coin: string
+  coin: string        // raw API name (e.g. "@260" for spot, "BTC" for perp)
+  coinDisplay: string // human-readable name (e.g. "BTC" resolved from spot index)
   side: TradeSide
   direction: string
   isTaker: boolean
@@ -162,7 +163,8 @@ export interface TradeExecutionMetrics {
 }
 
 export interface AssetSummary {
-  coin: string
+  coin: string        // raw API name
+  displayName: string // human-readable name
   totalTrades: number
   takerTrades: number
   makerTrades: number

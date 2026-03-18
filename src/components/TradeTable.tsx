@@ -127,7 +127,7 @@ function TradeRow({
       <td className="td font-mono text-xs whitespace-nowrap">
         {format(new Date(t.timestamp), 'MMM d, HH:mm:ss')}
       </td>
-      <td className="td-primary font-semibold">{t.coin}</td>
+      <td className="td-primary font-semibold">{t.coinDisplay}</td>
       <td className="td">
         {t.side === 'buy' ? (
           <span className="tag-buy">BUY</span>
@@ -145,7 +145,7 @@ function TradeRow({
       <td className="td text-right">
         <div className="text-text-primary">{fmtUsd(t.notionalUsd)}</div>
         <div className="text-xs text-text-muted">
-          {t.size.toFixed(4)} {t.coin}
+          {t.size.toFixed(4)} {t.coinDisplay}
         </div>
       </td>
       <td className="td text-right font-mono">${t.fillPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>

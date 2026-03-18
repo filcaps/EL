@@ -1,12 +1,10 @@
 import { useState } from 'react'
 import type { WalletSummary, TradeExecutionMetrics } from '../types'
-import { SummaryCards, CancelTradeRatioCard } from './SummaryCards'
+import { SummaryCards, CancelTradeRatioCard, TotalCostCard } from './SummaryCards'
 import { AssetBreakdown } from './AssetBreakdown'
 import { TradeTable } from './TradeTable'
 import { TradeDetail } from './TradeDetail'
 import { SlippageChart } from './SlippageChart'
-import { ExecutionDistributionChart } from './ExecutionDistributionChart'
-import { ExecutionCostOverTime } from './ExecutionCostOverTime'
 import { RefreshCw } from 'lucide-react'
 
 interface WalletDashboardProps {
@@ -21,11 +19,11 @@ export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
   const topCoin = summary.assetBreakdown[0]?.coin
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-4 md:px-6 py-6 space-y-5">
-      {/* Summary row */}
+    <div className="max-w-5xl mx-auto px-6 py-8 space-y-5">
+      {/* Header row */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-text-primary">
+          <h2 className="text-base font-semibold text-text-primary font-mono">
             {summary.address.slice(0, 6)}…{summary.address.slice(-4)}
           </h2>
           <p className="text-xs text-text-muted mt-0.5">
@@ -43,16 +41,13 @@ export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
       {/* Metric cards */}
       <SummaryCards summary={summary} />
 
+      {/* Total cost in $ */}
+      <TotalCostCard summary={summary} />
+
       {/* Cancel/Trade ratio */}
       <CancelTradeRatioCard ctr={summary.cancelTradeRatio} />
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        <ExecutionCostOverTime trades={summary.trades} filterCoin={filterCoin} />
-        <ExecutionDistributionChart trades={summary.trades} filterCoin={filterCoin} />
-      </div>
-
-      {/* Slippage chart for top asset */}
+      {/* Slippage chart for top/selected asset */}
       {topCoin && (
         <SlippageChart
           coin={filterCoin ?? topCoin}
@@ -88,7 +83,7 @@ export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
             className="inline-flex items-center gap-1.5 px-3 py-1 bg-accent-blue/20 border border-accent-blue/40 rounded-full text-xs text-accent-blue"
             onClick={() => setFilterCoin(undefined)}
           >
-            {filterCoin}
+            {summary.assetBreakdown.find((a) => a.coin === filterCoin)?.displayName ?? filterCoin}
             <span className="text-accent-blue/60">×</span>
           </button>
         </div>

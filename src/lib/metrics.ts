@@ -44,6 +44,7 @@ import {
   getCandlesFull,
   getHistoricalOrders,
   getMetaAndAssetCtxs,
+  getSpotMetaAndAssetCtxs,
 } from './hyperliquid'
 
 // ─── Candle helpers ───────────────────────────────────────────────────────────
@@ -150,12 +151,18 @@ export async function analyseWallet(
   let historicalOrders: HLHistoricalOrder[] = []
   let metaMap = new Map<string, number>()
   let assetCtxs: HLAssetContext[] = []
+  const spotCoinNames = new Map<string, string>() // maps "@N" → token name
 
   await Promise.allSettled([
     getHistoricalOrders(address).then((o) => { historicalOrders = o }).catch(() => {}),
     getMetaAndAssetCtxs().then(([meta, ctxs]) => {
       metaMap = buildCoinIndex(meta)
       assetCtxs = ctxs
+    }).catch(() => {}),
+    getSpotMetaAndAssetCtxs().then(([spotMeta]) => {
+      for (const token of spotMeta.tokens) {
+        spotCoinNames.set(`@${token.index}`, token.name)
+      }
     }).catch(() => {}),
   ])
 
@@ -236,7 +243,7 @@ export async function analyseWallet(
   // 7 ── Compute per-trade metrics ───────────────────────────────────────────
   progress('Computing execution metrics…')
   const tradeMetrics: TradeExecutionMetrics[] = recentFills.map((fill) =>
-    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, liveBooks),
+    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, liveBooks, spotCoinNames),
   )
 
   // 8 ── Cancel / trade ratio (windowed to fills time range) (fix #6) ────────
@@ -247,7 +254,7 @@ export async function analyseWallet(
 
   // 9 ── Aggregate ───────────────────────────────────────────────────────────
   progress('Aggregating results…')
-  const summary = aggregateWallet(address, tradeMetrics, ctr)
+  const summary = aggregateWallet(address, tradeMetrics, ctr, spotCoinNames)
 
   // Attach 24h market volume from Hyperliquid metadata (fix #8 — no longer dead code)
   for (const asset of summary.assetBreakdown) {
@@ -268,6 +275,7 @@ function computeTradeMetrics(
   candleMaps: Map<string, Map<number, HLCandle>>,
   slippageCache: SlippageCache,
   liveBooks: Map<string, HLL2Book>,
+  spotCoinNames: Map<string, string>,
 ): TradeExecutionMetrics {
   const fillPx = parseFloat(fill.px)
   const sz = parseFloat(fill.sz)
@@ -378,6 +386,7 @@ function computeTradeMetrics(
     oid: fill.oid,
     hash: fill.hash,
     coin: fill.coin,
+    coinDisplay: spotCoinNames.get(fill.coin) ?? fill.coin,
     side,
     direction: fill.dir,
     isTaker,
@@ -448,6 +457,7 @@ function aggregateWallet(
   address: string,
   trades: TradeExecutionMetrics[],
   ctr: CancelTradeRatio | null,
+  spotCoinNames: Map<string, string>,
 ): WalletSummary {
   const byAsset = new Map<string, TradeExecutionMetrics[]>()
   for (const t of trades) {
@@ -472,6 +482,7 @@ function aggregateWallet(
 
       return {
         coin,
+        displayName: spotCoinNames.get(coin) ?? coin,
         totalTrades: coinTrades.length,
         takerTrades: coinTrades.filter((t) => t.isTaker).length,
         makerTrades: coinTrades.filter((t) => !t.isTaker).length,

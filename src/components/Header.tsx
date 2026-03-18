@@ -1,5 +1,3 @@
-const QUOTE_OF_THE_DAY = '"The only journey is the one within." — RAINER MARIA RILKE'
-
 interface HeaderProps {
   onReset?: () => void
   walletAddress?: string
@@ -31,11 +29,6 @@ export function Header({ onReset, walletAddress }: HeaderProps) {
               Portfolio
             </span>
           </nav>
-        </div>
-
-        {/* Center: italic quote */}
-        <div className="hidden lg:block flex-1 text-center">
-          <span className="text-xs italic text-text-muted tracking-wide">{QUOTE_OF_THE_DAY}</span>
         </div>
 
         {/* Right: wallet pill or Connect Wallet */}

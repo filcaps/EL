@@ -63,7 +63,7 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
           {/* Trade identity */}
           <div className="card p-4 space-y-3">
             <div className="flex items-center gap-3">
-              <span className="text-lg font-bold text-text-primary">{t.coin}</span>
+              <span className="text-lg font-bold text-text-primary">{t.coinDisplay}</span>
               {t.side === 'buy' ? (
                 <span className="tag-buy">BUY</span>
               ) : (
@@ -80,7 +80,7 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
             <div className="grid grid-cols-3 gap-x-4 gap-y-2 text-xs">
               <KV label="Timestamp" value={format(new Date(t.timestamp), 'MMM d yyyy, HH:mm:ss')} mono />
               <KV label="Fill Price" value={`$${t.fillPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`} mono />
-              <KV label="Size" value={`${t.size.toFixed(6)} ${t.coin}`} mono />
+              <KV label="Size" value={`${t.size.toFixed(6)} ${t.coinDisplay}`} mono />
               <KV label="Notional" value={fmtUsd(t.notionalUsd)} mono />
               <KV label="Fee" value={`${fmtUsd(t.fee)} ${t.feeToken}`} mono warn />
               <KV
@@ -204,7 +204,7 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
           {/* Live order book */}
           <section>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="card-title">{t.coin} Live Spread</h3>
+              <h3 className="card-title">{t.coinDisplay} Live Spread</h3>
               {obLoading && <RefreshCw className="w-3.5 h-3.5 text-text-muted animate-spin" />}
             </div>
             <OrderBookPanel metrics={obMetrics} loading={obLoading} />

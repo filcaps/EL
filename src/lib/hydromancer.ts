@@ -1,6 +1,7 @@
 import type { HMSlippagePoint } from '../types'
 
-const BASE = 'https://api.hydromancer.xyz'
+// In dev, route through the Vite proxy to avoid CORS preflight rejection on the Authorization header
+const BASE = import.meta.env.DEV ? '/api/hydromancer' : 'https://api.hydromancer.xyz'
 const API_KEY = import.meta.env.VITE_HYDROMANCER_API_KEY as string
 
 // Supported notional tiers (USD)
