@@ -6,6 +6,7 @@ import { TradeTable } from './TradeTable'
 import { TradeDetail } from './TradeDetail'
 import { SlippageChart } from './SlippageChart'
 import { RefreshCw } from 'lucide-react'
+import { isPerpCoin } from '../lib/hyperliquid'
 
 interface WalletDashboardProps {
   summary: WalletSummary
@@ -16,7 +17,9 @@ export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
   const [selectedTrade, setSelectedTrade] = useState<TradeExecutionMetrics | null>(null)
   const [filterCoin, setFilterCoin] = useState<string | undefined>()
 
-  const topCoin = summary.assetBreakdown[0]?.coin
+  // Only use a perp coin for the slippage chart — Hydromancer has no data for spot (@N) coins
+  const topPerpCoin = summary.assetBreakdown.find((a) => isPerpCoin(a.coin))?.coin
+  const chartCoin = filterCoin && isPerpCoin(filterCoin) ? filterCoin : topPerpCoin
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-5">
@@ -47,12 +50,12 @@ export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
       {/* Cancel/Trade ratio */}
       <CancelTradeRatioCard ctr={summary.cancelTradeRatio} />
 
-      {/* Slippage chart for top/selected asset */}
-      {topCoin && (
+      {/* Slippage chart — perp coins only */}
+      {chartCoin && (
         <SlippageChart
-          coin={filterCoin ?? topCoin}
+          coin={chartCoin}
           notionalUsd={(() => {
-            const asset = summary.assetBreakdown.find((a) => a.coin === (filterCoin ?? topCoin))
+            const asset = summary.assetBreakdown.find((a) => a.coin === chartCoin)
             if (!asset || asset.totalTrades === 0) return 10_000
             return asset.totalVolumeUsd / asset.totalTrades
           })()}
