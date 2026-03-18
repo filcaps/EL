@@ -162,8 +162,21 @@ export async function analyseWallet(
       assetCtxs = ctxs
     }).catch(() => {}),
     getSpotMetaAndAssetCtxs().then(([spotMeta]) => {
-      for (const token of spotMeta.tokens) {
-        spotCoinNames.set(`@${token.index}`, token.name)
+      // Build token-index → name lookup first
+      const tokenNames = new Map<number, string>()
+      for (const token of spotMeta.tokens) tokenNames.set(token.index, token.name)
+
+      // @N in fills = universe[N].index — resolve display name from the market entry
+      for (const market of spotMeta.universe) {
+        let displayName: string
+        if (market.name.startsWith('@')) {
+          // Non-canonical market: name is "@N" — look up base token (tokens[0]) by its index
+          displayName = tokenNames.get(market.tokens[0]) ?? market.name
+        } else {
+          // Canonical market like "PURR/USDC" — take the base ticker before '/'
+          displayName = market.name.split('/')[0]
+        }
+        spotCoinNames.set(`@${market.index}`, displayName)
       }
     }).catch(() => {}),
   ])

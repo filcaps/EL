@@ -105,7 +105,10 @@ export async function getMetaAndAssetCtxs(): Promise<[HLMeta, HLAssetContext[]]>
 // ─── Spot metadata + asset contexts ──────────────────────────────────────────
 
 export async function getSpotMetaAndAssetCtxs(): Promise<
-  [{ tokens: Array<{ name: string; index: number; tokenId: string; szDecimals: number }> }, unknown[]]
+  [{
+    tokens: Array<{ name: string; index: number; tokenId: string; szDecimals: number }>
+    universe: Array<{ name: string; index: number; tokens: number[] }>
+  }, unknown[]]
 > {
   return post('spotMetaAndAssetCtxs')
 }
