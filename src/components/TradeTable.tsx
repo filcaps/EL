@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { format } from 'date-fns'
 import { ChevronDown, ChevronUp, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 import type { TradeExecutionMetrics } from '../types'
+import type { BuilderFeeMap } from '../App'
 import { fmtBps, fmtUsd } from '../lib/metrics'
 
 type SortKey = keyof TradeExecutionMetrics
@@ -10,6 +11,7 @@ type MarketType = 'all' | 'spot' | 'perp'
 
 interface TradeTableProps {
   trades: TradeExecutionMetrics[]
+  builderFeeMap: BuilderFeeMap
   onSelectTrade: (trade: TradeExecutionMetrics) => void
   filterCoin?: string
 }
@@ -24,7 +26,7 @@ function fmtSliderValue(v: number): string {
   return `$${v.toFixed(0)}`
 }
 
-export function TradeTable({ trades, onSelectTrade, filterCoin }: TradeTableProps) {
+export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }: TradeTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('timestamp')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [page, setPage] = useState(0)
@@ -253,7 +255,7 @@ export function TradeTable({ trades, onSelectTrade, filterCoin }: TradeTableProp
           </thead>
           <tbody>
             {paginated.map((t) => (
-              <TradeRow key={t.tid} trade={t} onClick={() => onSelectTrade(t)} />
+              <TradeRow key={t.tid} trade={t} builderFee={builderFeeMap.get(t.tid) ?? t.builderFee} onClick={() => onSelectTrade(t)} />
             ))}
             {paginated.length === 0 && (
               <tr>
@@ -297,9 +299,11 @@ export function TradeTable({ trades, onSelectTrade, filterCoin }: TradeTableProp
 
 function TradeRow({
   trade: t,
+  builderFee,
   onClick,
 }: {
   trade: TradeExecutionMetrics
+  builderFee: number
   onClick: () => void
 }) {
   return (
@@ -332,22 +336,19 @@ function TradeRow({
         ${t.fillPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
       </td>
       <td className="td text-right text-text-secondary">
-        {/* Full bid-ask spread = 2 × halfSpread */}
         {t.halfSpreadBps !== null ? fmtBps(t.halfSpreadBps * 2) : '—'}
       </td>
       <td className="td text-right text-text-secondary">
-        {/* Total directional slippage from Hydromancer (already includes half-spread) */}
         {fmtBps(t.slippageBps)}
       </td>
       <td className="td text-right text-text-secondary">
-        {/* Market impact above half-spread (pure size effect) */}
         {fmtBps(t.additionalImpactBps)}
       </td>
       <td className="td text-right text-text-secondary">
         {fmtBps(t.feeBps)}
       </td>
       <td className="td text-right text-text-secondary">
-        {t.builderFee > 0 ? fmtUsd(t.builderFee) : '—'}
+        {builderFee > 0 ? fmtUsd(builderFee) : '—'}
       </td>
       <td className="td text-right">
         <ChevronRight className="w-3.5 h-3.5 text-text-muted ml-auto" />

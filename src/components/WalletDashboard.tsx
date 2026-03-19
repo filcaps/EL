@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { WalletSummary, TradeExecutionMetrics } from '../types'
+import type { BuilderFeeMap } from '../App'
 import { AssetBreakdown } from './AssetBreakdown'
 import { TradeTable } from './TradeTable'
 import { TradeDetail } from './TradeDetail'
@@ -9,17 +10,24 @@ import { fmtUsd, fmtBps } from '../lib/metrics'
 
 interface WalletDashboardProps {
   summary: WalletSummary
+  builderFeeMap: BuilderFeeMap
   onRefresh?: () => void
 }
 
-export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
+export function WalletDashboard({ summary, builderFeeMap, onRefresh }: WalletDashboardProps) {
   const [selectedTrade, setSelectedTrade] = useState<TradeExecutionMetrics | null>(null)
   const [filterCoin, setFilterCoin] = useState<string | undefined>()
 
-  const builderFeesTotal = summary.trades.reduce((s, t) => s + t.builderFee, 0)
+  // Sum builder fees from enrichment map (populated in background after initial load)
+  const builderFeesTotal = builderFeeMap.size > 0
+    ? Array.from(builderFeeMap.values()).reduce((s, v) => s + v, 0)
+    : summary.trades.reduce((s, t) => s + t.builderFee, 0)
+
   const totalSlippageUsd = summary.avgSlippageBps !== null
     ? Math.max(0, (summary.avgSlippageBps / 10_000) * summary.totalVolumeUsd)
     : null
+
+  const isEnriching = builderFeeMap.size < summary.trades.filter(t => t.oid > 0).length
 
   const stats = [
     {
@@ -36,7 +44,10 @@ export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
     },
     {
       label: 'Builder Fees Paid',
-      value: builderFeesTotal > 0 ? fmtUsd(builderFeesTotal) : '—',
+      value: builderFeesTotal > 0
+        ? fmtUsd(builderFeesTotal)
+        : isEnriching ? 'loading…' : '—',
+      enriching: isEnriching && builderFeesTotal === 0,
     },
     {
       label: 'Total Slippage',
@@ -75,7 +86,11 @@ export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
           {stats.map((s) => (
             <div key={s.label} className="py-3.5 flex items-center justify-between">
               <span className="text-xs text-text-muted">{s.label}</span>
-              <span className="font-mono text-sm text-text-secondary font-medium">{s.value}</span>
+              <span className={`font-mono text-sm font-medium ${
+                'enriching' in s && s.enriching ? 'text-text-dim italic' : 'text-text-secondary'
+              }`}>
+                {s.value}
+              </span>
             </div>
           ))}
         </div>
@@ -124,6 +139,7 @@ export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
       {/* Trade table */}
       <TradeTable
         trades={summary.trades}
+        builderFeeMap={builderFeeMap}
         onSelectTrade={setSelectedTrade}
         filterCoin={filterCoin}
       />

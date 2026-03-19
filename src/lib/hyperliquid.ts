@@ -28,6 +28,50 @@ export async function getUserFills(address: string): Promise<HLFill[]> {
   return post<HLFill[]>('userFills', { user: address.toLowerCase() })
 }
 
+// ─── Builder fee enrichment ───────────────────────────────────────────────────
+
+/**
+ * Attempt to fetch the builder fee for a single fill, identified by its order ID.
+ *
+ * Hyperliquid's public REST API does not currently expose builder fees in the
+ * fills response or via a transaction-hash lookup.  The `orderStatus` endpoint
+ * returns the original order object, but the `builderFee` action field is not
+ * forwarded in the response either.
+ *
+ * This function is the single hook point: when HL adds the field (or a tx-level
+ * endpoint becomes available), only this function needs to change.  All UI wiring
+ * (background batch loading, reactive state updates) is already in place.
+ *
+ * Returns 0 when the fee cannot be determined.
+ */
+export async function fetchOrderBuilderFee(
+  user: string,
+  oid: number,
+): Promise<number> {
+  try {
+    type OrderStatusResp = {
+      status: string
+      order?: {
+        order?: { builderFee?: string | number }
+      }
+    }
+    const resp = await post<OrderStatusResp>('orderStatus', {
+      user: user.toLowerCase(),
+      oid,
+    })
+    const raw = resp?.order?.order?.builderFee
+    if (raw !== undefined && raw !== null) {
+      // HL expresses builderFee in tenths of bps; convert to a USD amount
+      // requires knowing the notional — caller must multiply by notional / 10_000 / 10
+      // For now return the raw tenths-of-bps value so callers can scale
+      return typeof raw === 'string' ? parseFloat(raw) : Number(raw)
+    }
+  } catch {
+    // non-fatal — leave as 0
+  }
+  return 0
+}
+
 export async function getUserFillsByTime(
   address: string,
   startTime: number,
