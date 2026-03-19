@@ -17,16 +17,26 @@ interface ChartPoint {
 export function CostChart({ trades }: CostChartProps) {
   const data = useMemo<ChartPoint[]>(() => {
     const sorted = [...trades].sort((a, b) => a.timestamp - b.timestamp)
+    if (sorted.length === 0) return []
+
     let cumCost = 0
     let cumFees = 0
-    return sorted.map((t) => {
+
+    // Anchor at zero just before the first trade so the chart starts flat
+    const points: ChartPoint[] = [
+      { date: sorted[0].timestamp - 1, cumCost: 0, cumFees: 0 },
+    ]
+
+    for (const t of sorted) {
       const slippageCost = t.slippageBps !== null
         ? Math.max(0, (t.slippageBps / 10_000) * t.notionalUsd)
         : 0
       cumFees += t.fee
       cumCost += t.fee + slippageCost
-      return { date: t.timestamp, cumCost, cumFees }
-    })
+      points.push({ date: t.timestamp, cumCost, cumFees })
+    }
+
+    return points
   }, [trades])
 
   if (data.length === 0) {
@@ -79,7 +89,7 @@ export function CostChart({ trades }: CostChartProps) {
         />
         <Tooltip content={<CustomTooltip />} />
         <Area
-          type="monotone"
+          type="stepAfter"
           dataKey="cumCost"
           name="Total Cost"
           stroke="#3B82F6"
@@ -89,7 +99,7 @@ export function CostChart({ trades }: CostChartProps) {
           activeDot={{ r: 3, fill: '#3B82F6' }}
         />
         <Area
-          type="monotone"
+          type="stepAfter"
           dataKey="cumFees"
           name="Fees"
           stroke="#444"
