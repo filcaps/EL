@@ -16,10 +16,6 @@ interface TradeTableProps {
   filterCoin?: string
 }
 
-function isPerpCoin(coin: string) {
-  return !coin.startsWith('@')
-}
-
 function fmtSliderValue(v: number): string {
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
   if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
@@ -76,8 +72,8 @@ export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }:
   const filtered = useMemo(() => {
     return trades.filter((t) => {
       if (filterCoin && t.coin !== filterCoin) return false
-      if (marketType === 'spot' && isPerpCoin(t.coin)) return false
-      if (marketType === 'perp' && !isPerpCoin(t.coin)) return false
+      if (marketType === 'spot' && !t.isSpot) return false
+      if (marketType === 'perp' && t.isSpot) return false
       if (minValue > 0 && t.notionalUsd < minValue) return false
       if (maxValue < Infinity && t.notionalUsd > maxValue) return false
       return true

@@ -39,7 +39,6 @@ import {
 import {
   getL2Book,
   buildCoinIndex,
-  isPerpCoin,
   getAllUserFills,
   getCandlesFull,
   getHistoricalOrders,
@@ -169,23 +168,39 @@ export async function analyseWallet(
       const tokenNames = new Map<number, string>()
       for (const token of spotMeta.tokens) tokenNames.set(token.index, token.name)
 
-      // @N in fills = universe[N].index — resolve display name + candle ticker
+      // @N in fills = universe[N].index — resolve display name + candle ticker.
+      // Some HL API responses return the market/token name directly ("UBTC") instead
+      // of the @N notation, so we register both formats in every map so that
+      // isPerpCoin-equivalent checks, candle fetches, and display names all work
+      // regardless of which format appears in a fill.
       for (const market of spotMeta.universe) {
         const fillKey = `@${market.index}`
 
         if (market.isCanonical) {
           // Canonical market like "PURR/USDC":
-          //   display name = base ticker ("PURR")
-          //   candle API needs the base ticker too — "@N" returns null for canonical markets
+          //   candle API needs base ticker — "@N" returns null for canonical markets
           const baseTicker = market.name.split('/')[0]
+          // @N format (normal case)
           spotCoinNames.set(fillKey, baseTicker)
           spotCandleTickers.set(fillKey, baseTicker)
+          // Named format e.g. "PURR/USDC" (fallback for old fills)
+          spotCoinNames.set(market.name, baseTicker)
+          spotCandleTickers.set(market.name, baseTicker)
+          // Base ticker alone e.g. "PURR" (another possible fill format)
+          spotCoinNames.set(baseTicker, baseTicker)
+          spotCandleTickers.set(baseTicker, baseTicker)
         } else {
-          // Non-canonical market: name is "@N" — look up base token (tokens[0]) by its index
+          // Non-canonical market: name is "@N" in the universe.
+          // Look up base token name ("UBTC", "USDT0", etc.)
           const displayName = tokenNames.get(market.tokens[0]) ?? market.name
+          // @N format (normal case) — candle API accepts @N directly for non-canonical
           spotCoinNames.set(fillKey, displayName)
-          // Non-canonical coins use "@N" notation in candleSnapshot (works fine)
           spotCandleTickers.set(fillKey, fillKey)
+          // Token-name format ("UBTC") — candle API does NOT accept this; use @N instead
+          if (displayName !== fillKey) {
+            spotCoinNames.set(displayName, displayName)
+            spotCandleTickers.set(displayName, fillKey)  // "UBTC" → fetch as "@142"
+          }
         }
       }
     }).catch(() => {}),
@@ -199,8 +214,10 @@ export async function analyseWallet(
   const slippagePairs: Array<{ coin: string; tier: NotionalTier }> = []
   const seenPairs = new Set<string>()
 
+  // spotCoinNames is populated above; use it to classify coins here too
   for (const fill of recentFills) {
-    if (!isPerpCoin(fill.coin)) continue
+    const fillIsSpot = spotCoinNames.has(fill.coin) || fill.coin.startsWith('@')
+    if (fillIsSpot) continue
     const notional = parseFloat(fill.px) * parseFloat(fill.sz)
     const tier = closestTier(notional)
     fillTiers.set(fill.tid, tier)
@@ -259,7 +276,7 @@ export async function analyseWallet(
     // 6: Live order books (used as spread fallback)
     Promise.allSettled(
       Array.from(coinGroups.keys())
-        .filter(isPerpCoin)
+        .filter((c) => !spotCoinNames.has(c) && !c.startsWith('@'))
         .map(async (coin) => {
           try {
             liveBooks.set(coin, await getL2Book(coin))
@@ -336,6 +353,9 @@ function computeTradeMetrics(
   const builderFeeUsd = fill.builderFee ? parseFloat(fill.builderFee) : 0
   const side: 'buy' | 'sell' = fill.side === 'B' ? 'buy' : 'sell'
   const isTaker = fill.crossed
+  // A coin is spot if it is registered in spotCoinNames (covers both @N and
+  // named-format fills like "UBTC") or starts with "@" as a catch-all.
+  const isSpot = spotCoinNames.has(fill.coin) || fill.coin.startsWith('@')
 
   // ── Candle-based mid prices ──────────────────────────────────────────────
   let midAtTrade: number | null = null
@@ -364,7 +384,7 @@ function computeTradeMetrics(
   let slippageSource: TradeExecutionMetrics['slippageSource'] = 'unavailable'
 
   const tier = fillTiers.get(fill.tid)
-  if (tier && isPerpCoin(fill.coin)) {
+  if (tier && !isSpot) {
     const key = `${fill.coin}:${tier}`
     const pts = slippageCache[key] ?? []
     const nearest = nearestSlippagePoint(pts, fill.time)
@@ -443,6 +463,7 @@ function computeTradeMetrics(
     hash: fill.hash,
     coin: fill.coin,
     coinDisplay: spotCoinNames.get(fill.coin) ?? fill.coin,
+    isSpot,
     side,
     direction: fill.dir,
     isTaker,
