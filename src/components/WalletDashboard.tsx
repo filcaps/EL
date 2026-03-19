@@ -21,7 +21,7 @@ export function WalletDashboard({ summary, builderFeeMap, enrichmentDone, onRefr
 
   const builderFeesTotal =
     builderFeeMap.size > 0
-      ? Array.from(builderFeeMap.values()).reduce((s, v) => s + v, 0)
+      ? Array.from(builderFeeMap.values()).reduce((s, v) => s + v.feeUsd, 0)
       : summary.trades.reduce((s, t) => s + t.builderFee, 0)
 
   const totalSlippageUsd = summary.avgSlippageBps !== null
@@ -131,7 +131,11 @@ export function WalletDashboard({ summary, builderFeeMap, enrichmentDone, onRefr
 
       {/* Trade detail panel */}
       {selectedTrade && (
-        <TradeDetail trade={selectedTrade} onClose={() => setSelectedTrade(null)} />
+        <TradeDetail
+          trade={selectedTrade}
+          builderFeeEntry={builderFeeMap.get(selectedTrade.tid) ?? null}
+          onClose={() => setSelectedTrade(null)}
+        />
       )}
     </div>
   )

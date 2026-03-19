@@ -14,8 +14,12 @@ type AppState =
   | { view: 'error'; address: string; message: string }
   | { view: 'dashboard'; summary: WalletSummary }
 
-/** tid → builder fee in USD (populated in the background after initial load) */
-export type BuilderFeeMap = Map<number, number>
+export interface BuilderFeeEntry {
+  feeUsd: number
+  builderAddress: string | null
+}
+/** tid → builder fee info (populated in the background after initial load) */
+export type BuilderFeeMap = Map<number, BuilderFeeEntry>
 
 const ENRICH_CONCURRENCY = 15 // concurrent orderStatus requests
 const ZERO_HASH = /^0x0+$/
@@ -94,12 +98,12 @@ export default function App() {
             if (!active || enrichCancelRef.current) return
             // fetchOrderBuilderFee returns tenths-of-bps; multiply by notional
             // to get USD. Returns 0 when the API doesn't expose the field yet.
-            const tenthsBps = await fetchOrderBuilderFee(address, t.oid)
+            const { tenthsBps, builderAddress } = await fetchOrderBuilderFee(address, t.oid)
             if (tenthsBps > 0 && active && !enrichCancelRef.current) {
               const feeUsd = (tenthsBps / 10 / 10_000) * t.notionalUsd
               setBuilderFeeMap((prev) => {
                 const next = new Map(prev)
-                next.set(t.tid, feeUsd)
+                next.set(t.tid, { feeUsd, builderAddress })
                 return next
               })
             }

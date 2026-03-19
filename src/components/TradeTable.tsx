@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { format } from 'date-fns'
 import { ChevronDown, ChevronUp, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 import type { TradeExecutionMetrics } from '../types'
-import type { BuilderFeeMap } from '../App'
+import type { BuilderFeeMap, BuilderFeeEntry } from '../App'
 import { fmtBps, fmtUsd } from '../lib/metrics'
 
 type SortKey = keyof TradeExecutionMetrics
@@ -251,7 +251,7 @@ export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }:
           </thead>
           <tbody>
             {paginated.map((t) => (
-              <TradeRow key={t.tid} trade={t} builderFee={builderFeeMap.get(t.tid) ?? t.builderFee} onClick={() => onSelectTrade(t)} />
+              <TradeRow key={t.tid} trade={t} builderFeeEntry={builderFeeMap.get(t.tid) ?? null} onClick={() => onSelectTrade(t)} />
             ))}
             {paginated.length === 0 && (
               <tr>
@@ -295,11 +295,11 @@ export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }:
 
 function TradeRow({
   trade: t,
-  builderFee,
+  builderFeeEntry,
   onClick,
 }: {
   trade: TradeExecutionMetrics
-  builderFee: number
+  builderFeeEntry: BuilderFeeEntry | null
   onClick: () => void
 }) {
   return (
@@ -344,7 +344,7 @@ function TradeRow({
         {fmtBps(t.feeBps)}
       </td>
       <td className="td text-right text-text-secondary">
-        {builderFee > 0 ? fmtUsd(builderFee) : '—'}
+        {builderFeeEntry && builderFeeEntry.feeUsd > 0 ? fmtUsd(builderFeeEntry.feeUsd) : '—'}
       </td>
       <td className="td text-right">
         <ChevronRight className="w-3.5 h-3.5 text-text-muted ml-auto" />

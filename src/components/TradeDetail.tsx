@@ -2,16 +2,19 @@ import { useState, useEffect } from 'react'
 import { format } from 'date-fns'
 import { X, ExternalLink, RefreshCw, Copy, Check } from 'lucide-react'
 import type { TradeExecutionMetrics, OrderBookMetrics } from '../types'
+import type { BuilderFeeEntry } from '../App'
 import { fmtBps, fmtUsd, bpsColorClass, fetchOrderBookMetrics } from '../lib/metrics'
 import { getMetaAndAssetCtxs, buildCoinIndex } from '../lib/hyperliquid'
+import { lookupBuilder } from '../lib/builders'
 import { OrderBookPanel } from './OrderBookPanel'
 
 interface TradeDetailProps {
   trade: TradeExecutionMetrics
+  builderFeeEntry: BuilderFeeEntry | null
   onClose: () => void
 }
 
-export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
+export function TradeDetail({ trade: t, builderFeeEntry, onClose }: TradeDetailProps) {
   const [obMetrics, setObMetrics] = useState<OrderBookMetrics | null>(null)
   const [obLoading, setObLoading] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -117,9 +120,50 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
             </div>
           </div>
 
+          {/* Builder fee */}
+          {builderFeeEntry && builderFeeEntry.feeUsd > 0 && (() => {
+            const builder = lookupBuilder(builderFeeEntry.builderAddress)
+            return (
+              <div className="card p-4">
+                <div className="text-xs text-text-muted mb-2 font-medium uppercase tracking-wide">Builder Fee</div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    {builder?.logoUrl ? (
+                      <img
+                        src={builder.logoUrl}
+                        alt={builder.name}
+                        className="w-6 h-6 rounded-full object-cover bg-surface-3"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                      />
+                    ) : (
+                      <div className="w-6 h-6 rounded-full bg-surface-3 flex items-center justify-center text-xs text-text-muted font-bold">
+                        {builder ? builder.name[0].toUpperCase() : '?'}
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-sm font-medium text-text-primary">
+                        {builder ? builder.name : builderFeeEntry.builderAddress
+                          ? `${builderFeeEntry.builderAddress.slice(0,6)}…${builderFeeEntry.builderAddress.slice(-4)}`
+                          : 'Unknown builder'}
+                      </div>
+                      {builderFeeEntry.builderAddress && (
+                        <div className="text-xs text-text-muted font-mono">
+                          {builderFeeEntry.builderAddress.slice(0,10)}…{builderFeeEntry.builderAddress.slice(-6)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="font-mono text-sm text-text-secondary font-semibold">
+                    {fmtUsd(builderFeeEntry.feeUsd)}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Hydromancer liquidity data */}
           <section>
-            <h3 className="card-title mb-3">Liquidity at Execution · Hydromancer</h3>
+            <h3 className="card-title mb-3">Liquidity at Execution</h3>
             <div className="card divide-y divide-border">
               <CostRow
                 label="Bid-Ask Spread"

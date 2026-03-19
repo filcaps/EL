@@ -100,32 +100,60 @@ export async function getAllUserFills(
  *
  * Returns 0 when the fee cannot be determined.
  */
+export interface BuilderFeeResult {
+  /** Fee rate in tenths of basis points (HL native unit). 0 if none. */
+  tenthsBps: number
+  /**
+   * The builder's wallet address, if HL ever exposes it in orderStatus.
+   * Currently null — the address lives in the L1 transaction action which
+   * is not returned by any public REST endpoint.
+   */
+  builderAddress: string | null
+}
+
 export async function fetchOrderBuilderFee(
   user: string,
   oid: number,
-): Promise<number> {
+): Promise<BuilderFeeResult> {
   try {
     type OrderStatusResp = {
       status: string
       order?: {
-        order?: { builderFee?: string | number }
+        order?: {
+          builderFee?: string | number
+          builder?: { b?: string; f?: string | number } | string
+        }
       }
     }
     const resp = await post<OrderStatusResp>('orderStatus', {
       user: user.toLowerCase(),
       oid,
     })
-    const raw = resp?.order?.order?.builderFee
-    if (raw !== undefined && raw !== null) {
-      // HL expresses builderFee in tenths of bps; convert to a USD amount
-      // requires knowing the notional — caller must multiply by notional / 10_000 / 10
-      // For now return the raw tenths-of-bps value so callers can scale
-      return typeof raw === 'string' ? parseFloat(raw) : Number(raw)
+    const inner = resp?.order?.order
+    if (!inner) return { tenthsBps: 0, builderAddress: null }
+
+    // Fee rate: present as a number (tenths of bps) in some order types
+    const raw = inner.builderFee
+    const tenthsBps = raw !== undefined && raw !== null
+      ? typeof raw === 'string' ? parseFloat(raw) : Number(raw)
+      : 0
+
+    // Builder address: HL includes a "builder" field in the action when a
+    // builder code was used. Format: { "b": "0x...", "f": <tenthsBps> }
+    let builderAddress: string | null = null
+    if (inner.builder) {
+      if (typeof inner.builder === 'string') {
+        builderAddress = inner.builder.toLowerCase()
+      } else if (inner.builder.b) {
+        builderAddress = (inner.builder.b as string).toLowerCase()
+      }
     }
+
+    return { tenthsBps, builderAddress }
   } catch {
-    // non-fatal — leave as 0
+    // non-fatal
   }
-  return 0
+  return { tenthsBps: 0, builderAddress: null }
 }
 
 export async function getUserFillsByTime(
