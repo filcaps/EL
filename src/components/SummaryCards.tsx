@@ -125,9 +125,30 @@ interface TotalCostCardProps {
 }
 
 export function TotalCostCard({ summary }: TotalCostCardProps) {
-  const totalCostUsd = summary.estimatedTotalCostUsd
   const feesUsd = summary.totalFeesUsd
-  const slippageCostUsd = totalCostUsd !== null ? totalCostUsd - feesUsd : null
+  const vol = Math.max(summary.totalVolumeUsd, 1)
+  const feeBpsAvg = (feesUsd / vol) * 10_000
+
+  // Est. slippage cost derived from avg slippage bps × volume — always a positive cost.
+  // If avgSlippageBps is null or negative (rare: genuine price improvement vs benchmark),
+  // treat as zero to keep the sign consistent with fees.
+  const rawSlippageCostUsd =
+    summary.avgSlippageBps !== null
+      ? (summary.avgSlippageBps / 10_000) * summary.totalVolumeUsd
+      : null
+  const slippageCostUsd =
+    rawSlippageCostUsd !== null ? Math.max(0, rawSlippageCostUsd) : null
+  const isImprovement = rawSlippageCostUsd !== null && rawSlippageCostUsd < 0
+
+  // Total = fees + slippage (both positive costs)
+  const totalCostUsd =
+    slippageCostUsd !== null ? feesUsd + slippageCostUsd : null
+
+  // avg total bps for color
+  const avgTotalBps =
+    summary.avgSlippageBps !== null
+      ? feeBpsAvg + Math.max(0, summary.avgSlippageBps)
+      : null
 
   return (
     <div className="card p-5">
@@ -142,27 +163,29 @@ export function TotalCostCard({ summary }: TotalCostCardProps) {
           <div className="text-xs text-text-muted mb-1">Fees Paid</div>
           <div className="font-mono text-xl font-semibold text-warn">{fmtUsd(feesUsd)}</div>
           <div className="text-xs text-text-muted mt-0.5">
-            {fmtBps((feesUsd / Math.max(summary.totalVolumeUsd, 1)) * 10_000)} avg
+            {fmtBps(feeBpsAvg)} avg
           </div>
         </div>
 
         <div>
           <div className="text-xs text-text-muted mb-1">Est. Slippage Cost</div>
-          <div className={`font-mono text-xl font-semibold ${slippageCostUsd !== null ? bpsColorClass(summary.avgSlippageBps) : 'text-text-muted'}`}>
+          <div className={`font-mono text-xl font-semibold ${slippageCostUsd !== null ? 'text-warn' : 'text-text-muted'}`}>
             {slippageCostUsd !== null ? fmtUsd(slippageCostUsd) : '—'}
           </div>
           <div className="text-xs text-text-muted mt-0.5">
-            {fmtBps(summary.avgSlippageBps)} avg
+            {isImprovement
+              ? 'price improvement vs benchmark'
+              : fmtBps(summary.avgSlippageBps !== null ? Math.max(0, summary.avgSlippageBps) : null) + ' avg'}
           </div>
         </div>
 
         <div className="border-l border-border pl-4">
           <div className="text-xs text-text-muted mb-1">Total</div>
-          <div className={`font-mono text-2xl font-bold ${totalCostUsd !== null ? bpsColorClass(summary.avgTotalCostBps) : 'text-text-muted'}`}>
+          <div className={`font-mono text-2xl font-bold ${totalCostUsd !== null ? bpsColorClass(avgTotalBps) : 'text-text-muted'}`}>
             {totalCostUsd !== null ? fmtUsd(totalCostUsd) : '—'}
           </div>
           <div className="text-xs text-text-muted mt-0.5">
-            {fmtBps(summary.avgTotalCostBps)} avg · across {summary.totalTrades.toLocaleString()} trades
+            {fmtBps(avgTotalBps)} avg · across {summary.totalTrades.toLocaleString()} trades
           </div>
         </div>
       </div>

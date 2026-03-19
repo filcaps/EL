@@ -233,9 +233,9 @@ export function TradeTable({ trades, onSelectTrade, filterCoin }: TradeTableProp
         </div>
       )}
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto overflow-y-auto max-h-[560px]">
         <table className="w-full">
-          <thead>
+          <thead className="sticky top-0 z-10 bg-surface-1">
             <tr>
               <SortableTh label="Date / Time" k="timestamp" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
               <SortableTh label="Asset" k="coin" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
@@ -244,9 +244,9 @@ export function TradeTable({ trades, onSelectTrade, filterCoin }: TradeTableProp
               <SortableTh label="Size" k="notionalUsd" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Fill Px" k="fillPrice" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Spread" k="halfSpreadBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Buy Impact" k="rawBuySlippageBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Sell Impact" k="rawSellSlippageBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Fee" k="fee" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Slippage" k="slippageBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Mkt Impact" k="additionalImpactBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Fee" k="feeBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
               <th className="th" />
             </tr>
           </thead>
@@ -294,18 +294,6 @@ export function TradeTable({ trades, onSelectTrade, filterCoin }: TradeTableProp
   )
 }
 
-/** Market impact for buys: the cost above the half-spread (pure size effect) */
-function buyImpact(t: TradeExecutionMetrics): number | null {
-  if (t.rawBuySlippageBps === null || t.halfSpreadBps === null) return null
-  return Math.max(0, t.rawBuySlippageBps - t.halfSpreadBps)
-}
-
-/** Market impact for sells */
-function sellImpact(t: TradeExecutionMetrics): number | null {
-  if (t.rawSellSlippageBps === null || t.halfSpreadBps === null) return null
-  return Math.max(0, t.rawSellSlippageBps - t.halfSpreadBps)
-}
-
 function TradeRow({
   trade: t,
   onClick,
@@ -346,15 +334,17 @@ function TradeRow({
         {/* Full bid-ask spread = 2 × halfSpread */}
         {t.halfSpreadBps !== null ? fmtBps(t.halfSpreadBps * 2) : '—'}
       </td>
-      <td className={`td text-right ${bpsColorClass(buyImpact(t))}`}>
-        {/* Market impact beyond spread for buys */}
-        {fmtBps(buyImpact(t))}
+      <td className={`td text-right ${bpsColorClass(t.slippageBps)}`}>
+        {/* Total directional slippage from Hydromancer (already includes half-spread) */}
+        {fmtBps(t.slippageBps)}
       </td>
-      <td className={`td text-right ${bpsColorClass(sellImpact(t))}`}>
-        {/* Market impact beyond spread for sells */}
-        {fmtBps(sellImpact(t))}
+      <td className={`td text-right ${bpsColorClass(t.additionalImpactBps)}`}>
+        {/* Market impact above half-spread (pure size effect) */}
+        {fmtBps(t.additionalImpactBps)}
       </td>
-      <td className="td text-right text-text-muted">{fmtUsd(t.fee)}</td>
+      <td className="td text-right text-text-muted">
+        {fmtBps(t.feeBps)}
+      </td>
       <td className="td text-right">
         <ChevronRight className="w-3.5 h-3.5 text-text-muted ml-auto" />
       </td>

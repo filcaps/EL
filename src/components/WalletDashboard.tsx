@@ -4,9 +4,7 @@ import { SummaryCards, CancelTradeRatioCard, TotalCostCard } from './SummaryCard
 import { AssetBreakdown } from './AssetBreakdown'
 import { TradeTable } from './TradeTable'
 import { TradeDetail } from './TradeDetail'
-import { SlippageChart } from './SlippageChart'
 import { RefreshCw } from 'lucide-react'
-import { isPerpCoin } from '../lib/hyperliquid'
 
 interface WalletDashboardProps {
   summary: WalletSummary
@@ -16,10 +14,6 @@ interface WalletDashboardProps {
 export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
   const [selectedTrade, setSelectedTrade] = useState<TradeExecutionMetrics | null>(null)
   const [filterCoin, setFilterCoin] = useState<string | undefined>()
-
-  // Only use a perp coin for the slippage chart — Hydromancer has no data for spot (@N) coins
-  const topPerpCoin = summary.assetBreakdown.find((a) => isPerpCoin(a.coin))?.coin
-  const chartCoin = filterCoin && isPerpCoin(filterCoin) ? filterCoin : topPerpCoin
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-5">
@@ -49,28 +43,6 @@ export function WalletDashboard({ summary, onRefresh }: WalletDashboardProps) {
 
       {/* Cancel/Trade ratio */}
       <CancelTradeRatioCard ctr={summary.cancelTradeRatio} />
-
-      {/* Slippage chart — perp coins only */}
-      {chartCoin && (
-        <SlippageChart
-          coin={chartCoin}
-          notionalUsd={(() => {
-            const asset = summary.assetBreakdown.find((a) => a.coin === chartCoin)
-            if (!asset || asset.totalTrades === 0) return 10_000
-            return asset.totalVolumeUsd / asset.totalTrades
-          })()}
-          startTime={
-            summary.trades.length > 0
-              ? Math.min(...summary.trades.map((t) => t.timestamp)) - 24 * 60 * 60 * 1000
-              : undefined
-          }
-          endTime={
-            summary.trades.length > 0
-              ? Math.max(...summary.trades.map((t) => t.timestamp)) + 24 * 60 * 60 * 1000
-              : undefined
-          }
-        />
-      )}
 
       {/* Asset breakdown */}
       <AssetBreakdown

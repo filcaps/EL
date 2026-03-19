@@ -128,19 +128,19 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
                 source={sourceLabel}
               />
               <CostRow
-                label="Buy Market Impact"
-                desc="Extra cost above the spread for a buy at this notional. Zero for small orders that fill entirely at best ask; positive when the order walks the book."
-                bps={t.rawBuySlippageBps !== null && t.halfSpreadBps !== null
-                  ? Math.max(0, t.rawBuySlippageBps - t.halfSpreadBps)
-                  : null}
+                label={t.side === 'buy' ? 'Slippage (buy side)' : 'Slippage (sell side)'}
+                desc={
+                  t.side === 'buy'
+                    ? 'Total one-way cost from mid for a buy at this notional — includes half-spread plus any book-walk impact.'
+                    : 'Total one-way cost from mid for a sell at this notional — includes half-spread plus any book-walk impact.'
+                }
+                bps={t.slippageBps}
                 source={sourceLabel}
               />
               <CostRow
-                label="Sell Market Impact"
-                desc="Extra cost above the spread for a sell at this notional. Zero for small orders; positive when the order walks the book."
-                bps={t.rawSellSlippageBps !== null && t.halfSpreadBps !== null
-                  ? Math.max(0, t.rawSellSlippageBps - t.halfSpreadBps)
-                  : null}
+                label="Market Impact"
+                desc="Extra cost above the half-spread (pure size effect). Zero for small orders; rises when the order walks the book."
+                bps={t.additionalImpactBps}
                 source={sourceLabel}
               />
               <CostRow
@@ -149,6 +149,15 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
                 bps={t.feeBps}
                 alwaysShow
               />
+              {/* Total: slippage + fee, both shown as positive costs */}
+              {(t.slippageBps !== null) && (
+                <CostRow
+                  label="Total Cost"
+                  desc="Slippage + exchange fee. Represents the full round-trip cost of this execution vs. mid-price."
+                  bps={Math.max(0, t.slippageBps) + t.feeBps}
+                  total
+                />
+              )}
             </div>
           </section>
 

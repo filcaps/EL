@@ -140,9 +140,9 @@ export async function analyseWallet(
   const rawFills = await getUserFills(address)
   if (rawFills.length === 0) return emptyWallet(address)
 
-  // Sort newest-first explicitly before slicing (fix #13)
+  // Sort newest-first
   const fills = [...rawFills].sort((a, b) => b.time - a.time)
-  const recentFills = fills.slice(0, 1_000)
+  const recentFills = fills
 
   const minFillTime = arrayMin(recentFills.map((f) => f.time))
   const maxFillTime = arrayMax(recentFills.map((f) => f.time))
