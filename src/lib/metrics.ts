@@ -751,11 +751,6 @@ export function fmtUsd(v: number, decimals = 2): string {
   return `$${v.toFixed(decimals)}`
 }
 
-export function fmtPct(v: number | null, decimals = 3): string {
-  if (v === null) return '—'
-  return `${(v / 100).toFixed(decimals)}%`
-}
-
 export function bpsColorClass(
   v: number | null,
   positiveIsBad = true,
