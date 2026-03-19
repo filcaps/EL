@@ -11,52 +11,37 @@ import { fmtUsd, fmtBps } from '../lib/metrics'
 interface WalletDashboardProps {
   summary: WalletSummary
   builderFeeMap: BuilderFeeMap
+  enrichmentDone: boolean
   onRefresh?: () => void
 }
 
-export function WalletDashboard({ summary, builderFeeMap, onRefresh }: WalletDashboardProps) {
+export function WalletDashboard({ summary, builderFeeMap, enrichmentDone, onRefresh }: WalletDashboardProps) {
   const [selectedTrade, setSelectedTrade] = useState<TradeExecutionMetrics | null>(null)
   const [filterCoin, setFilterCoin] = useState<string | undefined>()
 
-  // Sum builder fees from enrichment map (populated in background after initial load)
-  const builderFeesTotal = builderFeeMap.size > 0
-    ? Array.from(builderFeeMap.values()).reduce((s, v) => s + v, 0)
-    : summary.trades.reduce((s, t) => s + t.builderFee, 0)
+  const builderFeesTotal =
+    builderFeeMap.size > 0
+      ? Array.from(builderFeeMap.values()).reduce((s, v) => s + v, 0)
+      : summary.trades.reduce((s, t) => s + t.builderFee, 0)
 
   const totalSlippageUsd = summary.avgSlippageBps !== null
     ? Math.max(0, (summary.avgSlippageBps / 10_000) * summary.totalVolumeUsd)
     : null
 
-  const isEnriching = builderFeeMap.size < summary.trades.filter(t => t.oid > 0).length
-
   const stats = [
-    {
-      label: 'Total Trades',
-      value: summary.totalTrades.toLocaleString(),
-    },
-    {
-      label: 'Volume',
-      value: fmtUsd(summary.totalVolumeUsd, 0),
-    },
-    {
-      label: 'HL Fees Paid',
-      value: fmtUsd(summary.totalFeesUsd),
-    },
+    { label: 'Total Trades', value: summary.totalTrades.toLocaleString() },
+    { label: 'Volume', value: fmtUsd(summary.totalVolumeUsd, 0) },
+    { label: 'Closed PnL', value: fmtUsd(summary.totalPnl) },
+    { label: 'HL Fees Paid', value: fmtUsd(summary.totalFeesUsd) },
     {
       label: 'Builder Fees Paid',
-      value: builderFeesTotal > 0
-        ? fmtUsd(builderFeesTotal)
-        : isEnriching ? 'loading…' : '—',
-      enriching: isEnriching && builderFeesTotal === 0,
+      value: enrichmentDone
+        ? (builderFeesTotal > 0 ? fmtUsd(builderFeesTotal) : '—')
+        : 'loading…',
+      enriching: !enrichmentDone,
     },
-    {
-      label: 'Total Slippage',
-      value: totalSlippageUsd !== null ? fmtUsd(totalSlippageUsd) : '—',
-    },
-    {
-      label: 'Avg Execution Cost',
-      value: fmtBps(summary.avgTotalCostBps),
-    },
+    { label: 'Total Slippage', value: totalSlippageUsd !== null ? fmtUsd(totalSlippageUsd) : '—' },
+    { label: 'Avg Execution Cost', value: fmtBps(summary.avgTotalCostBps) },
   ]
 
   return (

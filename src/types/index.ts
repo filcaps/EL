@@ -200,6 +200,7 @@ export interface WalletSummary {
   totalTrades: number
   totalVolumeUsd: number
   totalFeesUsd: number
+  totalPnl: number
   avgEffectiveSpreadBps: number | null
   avgSlippageBps: number | null
   avgTotalCostBps: number | null

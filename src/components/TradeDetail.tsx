@@ -50,7 +50,7 @@ export function TradeDetail({ trade: t, onClose }: TradeDetailProps) {
 
   const sourceLabel =
     t.slippageSource === 'hydromancer'
-      ? 'Hydromancer slippageHistory'
+      ? 'Market data (spread + impact)'
       : t.slippageSource === 'live_book'
       ? 'Live order book (spread only, no market impact)'
       : 'Unavailable'

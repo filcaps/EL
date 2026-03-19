@@ -23,6 +23,7 @@ const ZERO_HASH = /^0x0+$/
 export default function App() {
   const [state, setState] = useState<AppState>({ view: 'search' })
   const [builderFeeMap, setBuilderFeeMap] = useState<BuilderFeeMap>(new Map())
+  const [enrichmentDone, setEnrichmentDone] = useState(false)
   const enrichCancelRef = useRef<boolean>(false)
 
   const { ready, authenticated } = usePrivy()
@@ -36,6 +37,7 @@ export default function App() {
     // Cancel any in-flight enrichment from a previous analysis
     enrichCancelRef.current = true
     setBuilderFeeMap(new Map())
+    setEnrichmentDone(false)
 
     setState({ view: 'loading', address, stage: 'Initialising…' })
 
@@ -54,6 +56,7 @@ export default function App() {
     enrichCancelRef.current = true
     setState({ view: 'search' })
     setBuilderFeeMap(new Map())
+    setEnrichmentDone(false)
   }, [])
 
   const handleRefresh = useCallback(() => {
@@ -105,7 +108,9 @@ export default function App() {
       }
     }
 
-    runEnrichment()
+    runEnrichment().finally(() => {
+      if (active && !enrichCancelRef.current) setEnrichmentDone(true)
+    })
 
     return () => {
       active = false
@@ -154,6 +159,7 @@ export default function App() {
         <WalletDashboard
           summary={state.summary}
           builderFeeMap={builderFeeMap}
+          enrichmentDone={enrichmentDone}
           onRefresh={handleRefresh}
         />
       )}

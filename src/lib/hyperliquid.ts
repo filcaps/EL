@@ -28,6 +28,42 @@ export async function getUserFills(address: string): Promise<HLFill[]> {
   return post<HLFill[]>('userFills', { user: address.toLowerCase() })
 }
 
+/**
+ * Fetch ALL fills for an address, paginating backwards through history.
+ * The /info userFills endpoint caps at 2000 results. When the cap is hit we
+ * call userFillsByTime with endTime = (oldest seen fill time − 1ms) and
+ * repeat until a page comes back with fewer than 2000 results.
+ */
+export async function getAllUserFills(
+  address: string,
+  onProgress?: (fetched: number) => void,
+): Promise<HLFill[]> {
+  const PAGE = 2000
+  const user = address.toLowerCase()
+
+  const first = await post<HLFill[]>('userFills', { user })
+  onProgress?.(first.length)
+  if (first.length < PAGE) return first
+
+  const all: HLFill[] = [...first]
+  let oldestTime = first.reduce((m, f) => Math.min(m, f.time), Infinity)
+
+  while (true) {
+    const batch = await post<HLFill[]>('userFillsByTime', {
+      user,
+      startTime: 0,
+      endTime: oldestTime - 1,
+    })
+    if (batch.length === 0) break
+    all.push(...batch)
+    onProgress?.(all.length)
+    if (batch.length < PAGE) break
+    oldestTime = batch.reduce((m, f) => Math.min(m, f.time), oldestTime)
+  }
+
+  return all
+}
+
 // ─── Builder fee enrichment ───────────────────────────────────────────────────
 
 /**

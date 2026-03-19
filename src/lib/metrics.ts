@@ -40,7 +40,7 @@ import {
   getL2Book,
   buildCoinIndex,
   isPerpCoin,
-  getUserFills,
+  getAllUserFills,
   getCandlesFull,
   getHistoricalOrders,
   getMetaAndAssetCtxs,
@@ -135,9 +135,11 @@ export async function analyseWallet(
   const progress = (stage: string, detail?: string) =>
     onProgress?.({ stage, detail })
 
-  // 1 ── Fetch fills ──────────────────────────────────────────────────────────
+  // 1 ── Fetch fills (paginated — no 2000-fill cap) ──────────────────────────
   progress('Fetching trade history…')
-  const rawFills = await getUserFills(address)
+  const rawFills = await getAllUserFills(address, (n) =>
+    progress(`Fetching trade history…`, `${n.toLocaleString()} fills loaded`),
+  )
   if (rawFills.length === 0) return emptyWallet(address)
 
   // Sort newest-first
@@ -209,7 +211,7 @@ export async function analyseWallet(
     }
   }
 
-  // 4+5+6 ── Candles, slippage cache, live books — all in parallel (fix #11) ─
+  // 4+5+6 ── Candles, slippage cache, live books — all in parallel ──────────
   progress('Loading market data (candles · slippage · order books)…')
 
   const candleMaps = new Map<string, Map<number, HLCandle>>()
@@ -560,6 +562,7 @@ function aggregateWallet(
 
   const totalVolumeUsd = trades.reduce((s, t) => s + t.notionalUsd, 0)
   const totalFeesUsd = trades.reduce((s, t) => s + t.fee, 0)
+  const totalPnl = trades.reduce((s, t) => s + t.closedPnl, 0)
   const w = (t: TradeExecutionMetrics) => ({ w: t.notionalUsd })
 
   const avgEffSpread = weightedAvg(trades.map((t) => ({ v: t.effectiveSpreadBps, ...w(t) })))
@@ -569,7 +572,7 @@ function aggregateWallet(
   const estimatedTotalCostUsd =
     avgTotal !== null ? (avgTotal / 10_000) * totalVolumeUsd : null
 
-  // Coverage: fraction of trades with Hydromancer slippage data (fix #12)
+  // Coverage: fraction of trades with market slippage data
   const slippageDataCoverage =
     trades.length > 0
       ? trades.filter((t) => t.slippageSource === 'hydromancer').length / trades.length
@@ -580,6 +583,7 @@ function aggregateWallet(
     totalTrades: trades.length,
     totalVolumeUsd,
     totalFeesUsd,
+    totalPnl,
     avgEffectiveSpreadBps: avgEffSpread,
     avgSlippageBps: avgSlippage,
     avgTotalCostBps: avgTotal,
@@ -669,6 +673,7 @@ function emptyWallet(address: string): WalletSummary {
     totalTrades: 0,
     totalVolumeUsd: 0,
     totalFeesUsd: 0,
+    totalPnl: 0,
     avgEffectiveSpreadBps: null,
     avgSlippageBps: null,
     avgTotalCostBps: null,
