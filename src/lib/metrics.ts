@@ -149,62 +149,97 @@ export async function analyseWallet(
   const maxFillTime = arrayMax(recentFills.map((f) => f.time))
   const windowDays = (maxFillTime - minFillTime) / 86_400_000
 
-  // 2 ── Fetch historical orders in parallel with market data ────────────────
+  // 2 ── Fetch historical orders + market data in parallel ──────────────────
+  //       All three resolve before we classify a single coin.
   progress('Fetching order history & market data…')
   let historicalOrders: HLHistoricalOrder[] = []
   let metaMap = new Map<string, number>()
   let assetCtxs: HLAssetContext[] = []
-  const spotCoinNames = new Map<string, string>()    // "@N" → human-readable name
-  const spotCandleTickers = new Map<string, string>() // "@N" → ticker for candleSnapshot API
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let rawPerpMeta: any = null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let rawSpotMeta: any = null
 
   await Promise.allSettled([
     getHistoricalOrders(address).then((o) => { historicalOrders = o }).catch(() => {}),
     getMetaAndAssetCtxs().then(([meta, ctxs]) => {
+      rawPerpMeta = meta
       metaMap = buildCoinIndex(meta)
       assetCtxs = ctxs
     }).catch(() => {}),
-    getSpotMetaAndAssetCtxs().then(([spotMeta]) => {
-      // Build token-index → name lookup first
-      const tokenNames = new Map<number, string>()
-      for (const token of spotMeta.tokens) tokenNames.set(token.index, token.name)
+    getSpotMetaAndAssetCtxs().then(([sm]) => { rawSpotMeta = sm }).catch(() => {}),
+  ])
 
-      // @N in fills = universe[N].index — resolve display name + candle ticker.
-      // Some HL API responses return the market/token name directly ("UBTC") instead
-      // of the @N notation, so we register both formats in every map so that
-      // isPerpCoin-equivalent checks, candle fetches, and display names all work
-      // regardless of which format appears in a fill.
-      for (const market of spotMeta.universe) {
-        const fillKey = `@${market.index}`
+  // ── Build the definitive spot-coin set ────────────────────────────────────
+  // Strategy: collect EVERY possible coin identifier that could appear in a
+  // spot fill (both the standard @N format AND any named variant), then
+  // exclude identifiers that are also confirmed perp market names.
+  //
+  // This is done ONCE after both metas have resolved, so there is no race.
 
-        if (market.isCanonical) {
-          // Canonical market like "PURR/USDC":
-          //   candle API needs base ticker — "@N" returns null for canonical markets
-          const baseTicker = market.name.split('/')[0]
-          // @N format (normal case)
-          spotCoinNames.set(fillKey, baseTicker)
-          spotCandleTickers.set(fillKey, baseTicker)
-          // Named format e.g. "PURR/USDC" (fallback for old fills)
-          spotCoinNames.set(market.name, baseTicker)
-          spotCandleTickers.set(market.name, baseTicker)
-          // Base ticker alone e.g. "PURR" (another possible fill format)
-          spotCoinNames.set(baseTicker, baseTicker)
-          spotCandleTickers.set(baseTicker, baseTicker)
-        } else {
-          // Non-canonical market: name is "@N" in the universe.
-          // Look up base token name ("UBTC", "USDT0", etc.)
-          const displayName = tokenNames.get(market.tokens[0]) ?? market.name
-          // @N format (normal case) — candle API accepts @N directly for non-canonical
-          spotCoinNames.set(fillKey, displayName)
-          spotCandleTickers.set(fillKey, fillKey)
-          // Token-name format ("UBTC") — candle API does NOT accept this; use @N instead
-          if (displayName !== fillKey) {
-            spotCoinNames.set(displayName, displayName)
-            spotCandleTickers.set(displayName, fillKey)  // "UBTC" → fetch as "@142"
-          }
+  // Step A: all known perp market names  ("BTC", "ETH", "SOL", …)
+  const perpCoinSet = new Set<string>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (rawPerpMeta?.universe ?? []).map((m: any) => m.name as string),
+  )
+
+  // Step B: the two main maps used later
+  const spotCoinNames = new Map<string, string>()    // any coin id → display name
+  const spotCandleTickers = new Map<string, string>() // any coin id → candle ticker
+
+  // Step C: comprehensive spot id set — everything we can possibly see in fills
+  const spotCoinSet = new Set<string>()
+
+  if (rawSpotMeta) {
+    // token index → token name  (e.g. 197 → "UBTC")
+    const tokenNames = new Map<number, string>()
+    for (const token of rawSpotMeta.tokens) {
+      tokenNames.set(token.index, token.name as string)
+      // Every token name is a candidate spot identifier
+      // (skip if it's also a known perp name to avoid mis-classifying)
+      if (!perpCoinSet.has(token.name as string)) {
+        spotCoinSet.add(token.name as string)
+      }
+    }
+
+    for (const market of rawSpotMeta.universe) {
+      const fillKey = `@${market.index}`
+      // @N is always spot — add regardless of perp set
+      spotCoinSet.add(fillKey)
+
+      if (market.isCanonical) {
+        // e.g. "PURR/USDC" → base ticker "PURR"
+        const baseTicker = (market.name as string).split('/')[0]
+        // Register every format that could appear in a fill
+        for (const id of [fillKey, market.name as string, baseTicker]) {
+          spotCoinNames.set(id, baseTicker)
+          spotCandleTickers.set(id, baseTicker)   // candle API needs base ticker for canonical
+          if (!perpCoinSet.has(id)) spotCoinSet.add(id)
+        }
+      } else {
+        // Non-canonical: market.name is just "@N" again
+        const displayName = tokenNames.get((market.tokens as number[])[0]) ?? (market.name as string)
+        // @N format — candle API accepts @N directly
+        spotCoinNames.set(fillKey, displayName)
+        spotCandleTickers.set(fillKey, fillKey)
+        // Named format ("UBTC") — candle API rejects this; resolve to @N
+        if (displayName !== fillKey) {
+          spotCoinNames.set(displayName, displayName)
+          spotCandleTickers.set(displayName, fillKey)
+          if (!perpCoinSet.has(displayName)) spotCoinSet.add(displayName)
         }
       }
-    }).catch(() => {}),
-  ])
+    }
+  }
+
+  /**
+   * THE single, authoritative spot/perp classifier.
+   * Any coin id that starts with "@" is unambiguously a spot market index.
+   * Any coin id in spotCoinSet was explicitly identified from the spot meta.
+   * Everything else is treated as a perpetual.
+   */
+  const isSpotCoin = (coin: string): boolean =>
+    coin.startsWith('@') || spotCoinSet.has(coin)
 
   // 3 ── Group fills by coin; compute per-fill notional tiers ────────────────
   const coinGroups = groupByCoin(recentFills)
@@ -214,10 +249,8 @@ export async function analyseWallet(
   const slippagePairs: Array<{ coin: string; tier: NotionalTier }> = []
   const seenPairs = new Set<string>()
 
-  // spotCoinNames is populated above; use it to classify coins here too
   for (const fill of recentFills) {
-    const fillIsSpot = spotCoinNames.has(fill.coin) || fill.coin.startsWith('@')
-    if (fillIsSpot) continue
+    if (isSpotCoin(fill.coin)) continue
     const notional = parseFloat(fill.px) * parseFloat(fill.sz)
     const tier = closestTier(notional)
     fillTiers.set(fill.tid, tier)
@@ -276,7 +309,7 @@ export async function analyseWallet(
     // 6: Live order books (used as spread fallback)
     Promise.allSettled(
       Array.from(coinGroups.keys())
-        .filter((c) => !spotCoinNames.has(c) && !c.startsWith('@'))
+        .filter((c) => !isSpotCoin(c))
         .map(async (coin) => {
           try {
             liveBooks.set(coin, await getL2Book(coin))
@@ -290,7 +323,7 @@ export async function analyseWallet(
   // 7 ── Compute per-trade metrics ───────────────────────────────────────────
   progress('Computing execution metrics…')
   const tradeMetrics: TradeExecutionMetrics[] = recentFills.map((fill) =>
-    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, liveBooks, spotCoinNames),
+    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, liveBooks, spotCoinNames, isSpotCoin),
   )
 
   // 8 ── Cancel / trade ratio (windowed to fills time range) (fix #6) ────────
@@ -345,6 +378,7 @@ function computeTradeMetrics(
   slippageCache: SlippageCache,
   liveBooks: Map<string, HLL2Book>,
   spotCoinNames: Map<string, string>,
+  isSpotCoin: (coin: string) => boolean,
 ): TradeExecutionMetrics {
   const fillPx = parseFloat(fill.px)
   const sz = parseFloat(fill.sz)
@@ -353,9 +387,7 @@ function computeTradeMetrics(
   const builderFeeUsd = fill.builderFee ? parseFloat(fill.builderFee) : 0
   const side: 'buy' | 'sell' = fill.side === 'B' ? 'buy' : 'sell'
   const isTaker = fill.crossed
-  // A coin is spot if it is registered in spotCoinNames (covers both @N and
-  // named-format fills like "UBTC") or starts with "@" as a catch-all.
-  const isSpot = spotCoinNames.has(fill.coin) || fill.coin.startsWith('@')
+  const isSpot = isSpotCoin(fill.coin)
 
   // ── Candle-based mid prices ──────────────────────────────────────────────
   let midAtTrade: number | null = null
