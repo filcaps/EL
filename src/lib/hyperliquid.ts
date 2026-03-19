@@ -29,10 +29,18 @@ export async function getUserFills(address: string): Promise<HLFill[]> {
 }
 
 /**
- * Fetch ALL fills for an address, paginating backwards through history.
- * The /info userFills endpoint caps at 2000 results. When the cap is hit we
- * call userFillsByTime with endTime = (oldest seen fill time − 1ms) and
- * repeat until a page comes back with fewer than 2000 results.
+ * Fetch ALL fills for an address with no cap.
+ *
+ * Key facts about the HL API (verified empirically):
+ *  - userFills        → most-recent ≤ 2000 fills, sorted DESCENDING (newest first)
+ *  - userFillsByTime  → fills in [startTime, endTime], sorted ASCENDING (oldest first),
+ *                       capped at 2000 per call
+ *
+ * Because userFillsByTime is oldest-first, the correct strategy is FORWARD
+ * pagination: start at the HL genesis timestamp, take 2000 oldest fills, then
+ * advance startTime to (newestInBatch + 1ms) and repeat until the batch is
+ * smaller than the page size.  A dedup set by tid handles any timestamp
+ * collisions at page boundaries.
  */
 export async function getAllUserFills(
   address: string,
@@ -40,25 +48,37 @@ export async function getAllUserFills(
 ): Promise<HLFill[]> {
   const PAGE = 2000
   const user = address.toLowerCase()
+  // HL mainnet launched ~Oct 2023; use a safe early epoch to catch everything.
+  const HL_GENESIS = 1_672_531_200_000 // 2023-01-01T00:00:00Z
 
-  const first = await post<HLFill[]>('userFills', { user })
-  onProgress?.(first.length)
-  if (first.length < PAGE) return first
+  // Dedup key: tid when non-zero, otherwise fall back to "coin|time|oid" composite
+  // because dust-conversion fills share tid = 0.
+  const seen = new Set<string>()
+  const fillKey = (f: HLFill) =>
+    f.tid !== 0 ? String(f.tid) : `${f.coin}|${f.time}|${f.oid}`
 
-  const all: HLFill[] = [...first]
-  let oldestTime = first.reduce((m, f) => Math.min(m, f.time), Infinity)
+  const all: HLFill[] = []
+  let startTime = HL_GENESIS
 
   while (true) {
-    const batch = await post<HLFill[]>('userFillsByTime', {
-      user,
-      startTime: 0,
-      endTime: oldestTime - 1,
-    })
+    const batch = await post<HLFill[]>('userFillsByTime', { user, startTime })
+
     if (batch.length === 0) break
-    all.push(...batch)
+
+    for (const f of batch) {
+      const k = fillKey(f)
+      if (!seen.has(k)) {
+        seen.add(k)
+        all.push(f)
+      }
+    }
     onProgress?.(all.length)
-    if (batch.length < PAGE) break
-    oldestTime = batch.reduce((m, f) => Math.min(m, f.time), oldestTime)
+
+    if (batch.length < PAGE) break // final (incomplete) page — done
+
+    // Advance cursor to just after the newest fill in this batch
+    const newestInBatch = batch.reduce((m, f) => Math.max(m, f.time), 0)
+    startTime = newestInBatch + 1
   }
 
   return all
