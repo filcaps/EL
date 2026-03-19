@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { format } from 'date-fns'
 import { ChevronDown, ChevronUp, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 import type { TradeExecutionMetrics } from '../types'
-import { fmtBps, fmtUsd, bpsColorClass } from '../lib/metrics'
+import { fmtBps, fmtUsd } from '../lib/metrics'
 
 type SortKey = keyof TradeExecutionMetrics
 type SortDir = 'asc' | 'desc'
@@ -246,7 +246,8 @@ export function TradeTable({ trades, onSelectTrade, filterCoin }: TradeTableProp
               <SortableTh label="Spread" k="halfSpreadBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Slippage" k="slippageBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Mkt Impact" k="additionalImpactBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Fee" k="feeBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="HL Fee" k="feeBps" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Builder Fee" k="builderFee" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
               <th className="th" />
             </tr>
           </thead>
@@ -256,7 +257,7 @@ export function TradeTable({ trades, onSelectTrade, filterCoin }: TradeTableProp
             ))}
             {paginated.length === 0 && (
               <tr>
-                <td colSpan={11} className="td text-center text-text-muted py-8">
+                <td colSpan={12} className="td text-center text-text-muted py-8">
                   No trades match the current filters
                 </td>
               </tr>
@@ -330,20 +331,23 @@ function TradeRow({
       <td className="td text-right font-mono">
         ${t.fillPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
       </td>
-      <td className={`td text-right ${bpsColorClass(t.halfSpreadBps)}`}>
+      <td className="td text-right text-text-secondary">
         {/* Full bid-ask spread = 2 × halfSpread */}
         {t.halfSpreadBps !== null ? fmtBps(t.halfSpreadBps * 2) : '—'}
       </td>
-      <td className={`td text-right ${bpsColorClass(t.slippageBps)}`}>
+      <td className="td text-right text-text-secondary">
         {/* Total directional slippage from Hydromancer (already includes half-spread) */}
         {fmtBps(t.slippageBps)}
       </td>
-      <td className={`td text-right ${bpsColorClass(t.additionalImpactBps)}`}>
+      <td className="td text-right text-text-secondary">
         {/* Market impact above half-spread (pure size effect) */}
         {fmtBps(t.additionalImpactBps)}
       </td>
-      <td className="td text-right text-text-muted">
+      <td className="td text-right text-text-secondary">
         {fmtBps(t.feeBps)}
+      </td>
+      <td className="td text-right text-text-secondary">
+        {t.builderFee > 0 ? fmtUsd(t.builderFee) : '—'}
       </td>
       <td className="td text-right">
         <ChevronRight className="w-3.5 h-3.5 text-text-muted ml-auto" />

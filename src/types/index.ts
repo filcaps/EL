@@ -10,6 +10,7 @@ export interface HLFill {
   tid: number
   fee: string
   feeToken: string
+  builderFee?: string
   crossed: boolean // true = taker, false = maker
   hash: string
   dir: string      // e.g. "Open Long", "Close Short"
@@ -114,6 +115,7 @@ export interface TradeExecutionMetrics {
   notionalUsd: number
   timestamp: number
   fee: number
+  builderFee: number
   feeToken: string
   closedPnl: number
 

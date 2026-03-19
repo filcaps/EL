@@ -331,6 +331,7 @@ function computeTradeMetrics(
   const sz = parseFloat(fill.sz)
   const notional = fillPx * sz
   const feeUsd = parseFloat(fill.fee)
+  const builderFeeUsd = fill.builderFee ? parseFloat(fill.builderFee) : 0
   const side: 'buy' | 'sell' = fill.side === 'B' ? 'buy' : 'sell'
   const isTaker = fill.crossed
 
@@ -448,6 +449,7 @@ function computeTradeMetrics(
     notionalUsd: notional,
     timestamp: fill.time,
     fee: feeUsd,
+    builderFee: builderFeeUsd,
     feeToken: fill.feeToken,
     closedPnl: parseFloat(fill.closedPnl),
     midPriceAtExecution: midAtTrade,

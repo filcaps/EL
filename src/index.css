@@ -8,7 +8,8 @@
   }
 
   html {
-    background-color: #000000;
+    background: #060608;
+    min-height: 100vh;
     color: #ffffff;
   }
 
@@ -17,7 +18,8 @@
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: #000000;
+    background: radial-gradient(ellipse 80% 60% at 15% 40%, #0d0f1a 0%, #060608 55%);
+    min-height: 100vh;
   }
 
   ::-webkit-scrollbar {
