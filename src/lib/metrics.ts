@@ -156,97 +156,82 @@ export async function analyseWallet(
   let metaMap = new Map<string, number>()
   let assetCtxs: HLAssetContext[] = []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let rawPerpMeta: any = null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let rawSpotMeta: any = null
 
   await Promise.allSettled([
     getHistoricalOrders(address).then((o) => { historicalOrders = o }).catch(() => {}),
     getMetaAndAssetCtxs().then(([meta, ctxs]) => {
-      rawPerpMeta = meta
       metaMap = buildCoinIndex(meta)
       assetCtxs = ctxs
     }).catch(() => {}),
     getSpotMetaAndAssetCtxs().then(([sm]) => { rawSpotMeta = sm }).catch(() => {}),
   ])
 
-  // ── Build the definitive spot-coin set ────────────────────────────────────
-  // Strategy: collect EVERY possible coin identifier that could appear in a
-  // spot fill (both the standard @N format AND any named variant), then
-  // exclude identifiers that are also confirmed perp market names.
+  // ── Spot / HIP-3 classification ───────────────────────────────────────────
   //
-  // This is done ONCE after both metas have resolved, so there is no race.
+  // Confirmed from the Hyperliquid API (empirically, Mar 2025):
+  //   • Perp fills    → plain ticker:   "BTC", "ETH", "HYPE", "PURR", …
+  //   • Spot fills    → always @N:       "@0", "@107", "@142", "@180", …
+  //                     (canonical PURR/USDC fills use "@0", not "PURR/USDC")
+  //
+  // Therefore the authoritative rules are:
+  //   isSpot  = coin.startsWith('@') || coin.includes('/')
+  //             (the '/' guard catches any future "TOKEN/USDC" canonical format)
+  //   isHip3  = isSpot && NOT a canonical market index
+  //
+  // Named token strings (UBTC, HYPE, PURR) are NEVER fill coin values for spot.
+  // They only live in the spotMeta token list for display name resolution.
 
-  // Step A: all known perp market names  ("BTC", "ETH", "SOL", …)
-  const perpCoinSet = new Set<string>(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (rawPerpMeta?.universe ?? []).map((m: any) => m.name as string),
-  )
-
-  // Step B: the two main maps used later
-  const spotCoinNames = new Map<string, string>()    // any coin id → display name
-  const spotCandleTickers = new Map<string, string>() // any coin id → candle ticker
-
-  // Step C: comprehensive spot id set — everything we can possibly see in fills
-  const spotCoinSet = new Set<string>()
-  // HIP-3 = non-canonical spot tokens
-  const hip3CoinSet = new Set<string>()
+  // Map @N → human-readable display name (e.g. "@107" → "HYPE", "@0" → "PURR")
+  const spotCoinNames = new Map<string, string>()
+  // Map @N → the ticker the candle API wants
+  const spotCandleTickers = new Map<string, string>()
+  // Set of canonical @N keys (only PURR/USDC = "@0" today; future-proof)
+  const canonicalSpotKeys = new Set<string>()
 
   if (rawSpotMeta) {
-    // token index → token name  (e.g. 197 → "UBTC")
+    // Build token-index → token-name lookup
     const tokenNames = new Map<number, string>()
     for (const token of rawSpotMeta.tokens) {
       tokenNames.set(token.index, token.name as string)
-      // Every token name is a candidate spot identifier
-      // (skip if it's also a known perp name to avoid mis-classifying)
-      if (!perpCoinSet.has(token.name as string)) {
-        spotCoinSet.add(token.name as string)
-      }
     }
 
     for (const market of rawSpotMeta.universe) {
-      const fillKey = `@${market.index}`
-      // @N is always spot — add regardless of perp set
-      spotCoinSet.add(fillKey)
+      const fillKey = `@${market.index}` // e.g. "@0", "@107"
 
       if (market.isCanonical) {
-        // e.g. "PURR/USDC" → base ticker "PURR"
+        // Canonical spot (currently only PURR/USDC at index 0)
+        // Fills use "@0"; candle API needs the base ticker ("PURR")
         const baseTicker = (market.name as string).split('/')[0]
-        // Register every format that could appear in a fill
-        for (const id of [fillKey, market.name as string, baseTicker]) {
-          spotCoinNames.set(id, baseTicker)
-          spotCandleTickers.set(id, baseTicker)   // candle API needs base ticker for canonical
-          if (!perpCoinSet.has(id)) spotCoinSet.add(id)
-        }
+        spotCoinNames.set(fillKey, baseTicker)
+        spotCandleTickers.set(fillKey, baseTicker)
+        // Also register the "TOKEN/USDC" format as a safety net
+        spotCoinNames.set(market.name as string, baseTicker)
+        spotCandleTickers.set(market.name as string, baseTicker)
+        canonicalSpotKeys.add(fillKey)
       } else {
-        // Non-canonical (HIP-3): market.name is just "@N" again
-        const displayName = tokenNames.get((market.tokens as number[])[0]) ?? (market.name as string)
-        // @N format — candle API accepts @N directly
+        // Non-canonical (HIP-3): resolve @N → token name for display
+        const displayName = tokenNames.get((market.tokens as number[])[0]) ?? fillKey
         spotCoinNames.set(fillKey, displayName)
+        // Candle API: non-canonical markets accept @N directly
         spotCandleTickers.set(fillKey, fillKey)
-        hip3CoinSet.add(fillKey)
-        // Named format ("UBTC") — candle API rejects this; resolve to @N
-        if (displayName !== fillKey) {
-          spotCoinNames.set(displayName, displayName)
-          spotCandleTickers.set(displayName, fillKey)
-          if (!perpCoinSet.has(displayName)) spotCoinSet.add(displayName)
-          hip3CoinSet.add(displayName)
-        }
       }
     }
   }
 
   /**
-   * THE single, authoritative spot/perp classifier.
-   * Any coin id that starts with "@" is unambiguously a spot market index.
-   * Any coin id in spotCoinSet was explicitly identified from the spot meta.
-   * Everything else is treated as a perpetual.
+   * Spot: coin starts with "@" (all HL spot fills) OR contains "/" (canonical format safety-net)
+   * This never misclassifies perp coins (plain tickers like "BTC", "HYPE") as spot.
    */
   const isSpotCoin = (coin: string): boolean =>
-    coin.startsWith('@') || spotCoinSet.has(coin)
+    coin.startsWith('@') || coin.includes('/')
 
+  /**
+   * HIP-3: a spot coin that is NOT one of the canonical market indices.
+   * Currently: every @N except @0 (PURR/USDC).
+   */
   const isHip3Coin = (coin: string): boolean =>
-    hip3CoinSet.has(coin)
+    coin.startsWith('@') && !canonicalSpotKeys.has(coin)
 
   // 3 ── Group fills by coin; compute per-fill notional tiers ────────────────
   const coinGroups = groupByCoin(recentFills)
