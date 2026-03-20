@@ -398,19 +398,27 @@ function computeTradeMetrics(
 
     if (nearest) {
       slippageSource = 'hydromancer'
+      // halfSpreadBps is always present; full spread = halfSpreadBps × 2
       halfSpreadBps = nearest.halfSpreadBps
       rawBuySlippageBps = nearest.buySlippageBps ?? null
       rawSellSlippageBps = nearest.sellSlippageBps ?? null
 
       if (isTaker) {
-        // Directional slippage for this trade side
+        // Directional slippage (already includes halfSpread component)
         slippageBps = side === 'buy' ? rawBuySlippageBps : rawSellSlippageBps
-        additionalImpactBps =
-          slippageBps !== null
-            ? Math.max(0, slippageBps - nearest.halfSpreadBps)
-            : null
+
+        if (slippageBps !== null) {
+          // Market impact = slippage above and beyond the half-spread
+          additionalImpactBps = Math.max(0, slippageBps - nearest.halfSpreadBps)
+        } else {
+          // buySlippageBps / sellSlippageBps were null (insufficient liquidity for the
+          // requested notional size). Fall back to halfSpreadBps as a lower-bound:
+          // at minimum a taker pays at least the half-spread to cross the book.
+          slippageBps = nearest.halfSpreadBps
+          additionalImpactBps = 0
+        }
       }
-      // Makers: slippageBps stays null — they don't cause market impact
+      // Makers: slippageBps stays null — they earn the spread, not pay it
     }
   }
 
