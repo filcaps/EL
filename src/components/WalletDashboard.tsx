@@ -87,16 +87,22 @@ export function WalletDashboard({ summary, builderFeeMap, enrichmentDone, onRefr
             <div className="flex items-center gap-4 text-xs text-text-muted">
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-3 h-px bg-accent-blue" />
-                Total (fees + slippage)
+                Total
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-3 h-px bg-border-bright" />
-                Fees only
+                HL Fees
               </span>
+              {builderFeesTotal > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-px" style={{ background: '#8B5CF6' }} />
+                  Builder Fees
+                </span>
+              )}
             </div>
           </div>
           <div className="flex-1 min-h-[220px]">
-            <CostChart trades={summary.trades} />
+            <CostChart trades={summary.trades} builderFeeMap={builderFeeMap} />
           </div>
         </div>
       </div>

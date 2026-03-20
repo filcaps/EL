@@ -1,12 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { format } from 'date-fns'
-import { X, ExternalLink, RefreshCw, Copy, Check } from 'lucide-react'
-import type { TradeExecutionMetrics, OrderBookMetrics } from '../types'
+import { X, ExternalLink, Copy, Check } from 'lucide-react'
+import type { TradeExecutionMetrics } from '../types'
 import type { BuilderFeeEntry } from '../App'
-import { fmtBps, fmtUsd, bpsColorClass, fetchOrderBookMetrics } from '../lib/metrics'
-import { getMetaAndAssetCtxs, buildCoinIndex } from '../lib/hyperliquid'
+import { fmtBps, fmtUsd, bpsColorClass } from '../lib/metrics'
 import { lookupBuilder } from '../lib/builders'
-import { OrderBookPanel } from './OrderBookPanel'
 
 interface TradeDetailProps {
   trade: TradeExecutionMetrics
@@ -15,8 +13,6 @@ interface TradeDetailProps {
 }
 
 export function TradeDetail({ trade: t, builderFeeEntry, onClose }: TradeDetailProps) {
-  const [obMetrics, setObMetrics] = useState<OrderBookMetrics | null>(null)
-  const [obLoading, setObLoading] = useState(true)
   const [copied, setCopied] = useState(false)
 
   const isZeroHash = /^0x0+$/.test(t.hash)
@@ -30,32 +26,9 @@ export function TradeDetail({ trade: t, builderFeeEntry, onClose }: TradeDetailP
     })
   }
 
-  useEffect(() => {
-    setObLoading(true)
-    setObMetrics(null)
-
-    async function load() {
-      try {
-        const [meta, ctxs] = await getMetaAndAssetCtxs()
-        const idx = buildCoinIndex(meta).get(t.coin)
-        const dayVol = idx !== undefined ? parseFloat(ctxs[idx]?.dayNtlVlm ?? '0') : 0
-        const metrics = await fetchOrderBookMetrics(t.coin, dayVol)
-        setObMetrics(metrics)
-      } catch {
-        // no-op
-      } finally {
-        setObLoading(false)
-      }
-    }
-
-    load()
-  }, [t.coin, t.tid])
-
   const sourceLabel =
     t.slippageSource === 'hydromancer'
-      ? 'Market data (spread + impact)'
-      : t.slippageSource === 'live_book'
-      ? 'Live order book (spread only, no market impact)'
+      ? 'Historical market data (Hydromancer)'
       : 'Unavailable'
 
   return (
@@ -205,15 +178,6 @@ export function TradeDetail({ trade: t, builderFeeEntry, onClose }: TradeDetailP
             </div>
           </section>
 
-          {/* Live order book */}
-          <section>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="card-title">{t.coinDisplay} Live Spread</h3>
-              {obLoading && <RefreshCw className="w-3.5 h-3.5 text-text-muted animate-spin" />}
-            </div>
-            <OrderBookPanel metrics={obMetrics} loading={obLoading} />
-          </section>
-
           {/* Explorer link */}
           {displayHash && (
             <a
@@ -276,7 +240,7 @@ function CostRow({
   total?: boolean
   subtotal?: boolean
   alwaysShow?: boolean
-  dimmed?: boolean   // shown greyed-out (informational only, already counted elsewhere)
+  dimmed?: boolean
   positiveIsBad?: boolean
 }) {
   if (bps === null && !alwaysShow) {

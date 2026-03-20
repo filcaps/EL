@@ -20,13 +20,11 @@
 import type {
   HLFill,
   HLCandle,
-  HLL2Book,
   HLHistoricalOrder,
   HLAssetContext,
   TradeExecutionMetrics,
   AssetSummary,
   WalletSummary,
-  OrderBookMetrics,
   CancelTradeRatio,
 } from '../types'
 import {
@@ -37,7 +35,6 @@ import {
   type NotionalTier,
 } from './hydromancer'
 import {
-  getL2Book,
   buildCoinIndex,
   getAllUserFills,
   getCandlesFull,
@@ -253,18 +250,16 @@ export async function analyseWallet(
     }
   }
 
-  // 4+5+6 ── Candles, slippage cache, live books — all in parallel ──────────
-  progress('Loading market data (candles · slippage · order books)…')
+  // 4+5 ── Candles + Hydromancer slippage cache — all in parallel ─────────────
+  progress('Loading market data (candles · slippage)…')
 
   const candleMaps = new Map<string, Map<number, HLCandle>>()
-  const liveBooks = new Map<string, HLL2Book>()
   let slippageCache: SlippageCache = {}
 
   await Promise.all([
     // 4: 1-min candles for every coin.
-    //    Spot coins: canonical markets (e.g. PURR/USDC = @0) need their base ticker ("PURR")
-    //    because the candleSnapshot API returns null for "@N" notation on canonical markets.
-    //    Non-canonical spot markets ("@1", "@2", ...) work fine with "@N" directly.
+    //    Canonical spot (PURR/USDC = @0) needs base ticker ("PURR") for the candle API.
+    //    Non-canonical spot (@N) and perps use the coin string directly.
     Promise.allSettled(
       Array.from(coinGroups.entries())
         .map(async ([coin, coinFills]) => {
@@ -275,7 +270,7 @@ export async function analyseWallet(
           const candleTicker = spotCandleTickers.get(coin) ?? coin
           try {
             progress('Loading candles…', coin)
-            // Buffer: 10 min before earliest fill, 30 min after latest (covers +5 min realized spread + edge cases)
+            // Buffer: 10 min before earliest fill, 30 min after latest
             const candles = await getCandlesFull(candleTicker, minT - 600_000, maxT + 1_800_000)
             // Store under original fill coin key so computeTradeMetrics can look it up
             candleMaps.set(coin, buildCandleMap(candles))
@@ -285,7 +280,7 @@ export async function analyseWallet(
         }),
     ),
 
-    // 5: Hydromancer slippage cache (one request per unique coin×tier pair)
+    // 5: Hydromancer slippage cache (one request per unique perp coin×tier pair)
     (async () => {
       try {
         slippageCache = await buildSlippageCache(
@@ -297,25 +292,12 @@ export async function analyseWallet(
         // non-fatal
       }
     })(),
-
-    // 6: Live order books (used as spread fallback)
-    Promise.allSettled(
-      Array.from(coinGroups.keys())
-        .filter((c) => !isSpotCoin(c))
-        .map(async (coin) => {
-          try {
-            liveBooks.set(coin, await getL2Book(coin))
-          } catch {
-            // non-fatal
-          }
-        }),
-    ),
   ])
 
-  // 7 ── Compute per-trade metrics ───────────────────────────────────────────
+  // 6 ── Compute per-trade metrics ────────────────────────────────────────────
   progress('Computing execution metrics…')
   const tradeMetrics: TradeExecutionMetrics[] = recentFills.map((fill) =>
-    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, liveBooks, spotCoinNames, isSpotCoin, isHip3Coin),
+    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, spotCoinNames, isSpotCoin, isHip3Coin),
   )
 
   // 8 ── Cancel / trade ratio (windowed to fills time range) (fix #6) ────────
@@ -368,7 +350,6 @@ function computeTradeMetrics(
   fillTiers: Map<number, NotionalTier>,
   candleMaps: Map<string, Map<number, HLCandle>>,
   slippageCache: SlippageCache,
-  liveBooks: Map<string, HLL2Book>,
   spotCoinNames: Map<string, string>,
   isSpotCoin: (coin: string) => boolean,
   isHip3Coin: (coin: string) => boolean,
@@ -430,23 +411,6 @@ function computeTradeMetrics(
             : null
       }
       // Makers: slippageBps stays null — they don't cause market impact
-    }
-  }
-
-  // Fallback to live order book for spread only (fix #3: only spread, no taker slippage)
-  if (halfSpreadBps === null) {
-    const book = liveBooks.get(fill.coin)
-    if (book && book.levels[0].length > 0 && book.levels[1].length > 0) {
-      const bid = parseFloat(book.levels[0][0].px)
-      const ask = parseFloat(book.levels[1][0].px)
-      const mid = (bid + ask) / 2
-      halfSpreadBps = ((ask - bid) / 2 / mid) * 10_000
-      slippageSource = 'live_book'
-      if (isTaker) {
-        // Approximate: assume no book walking (lower bound on actual cost)
-        slippageBps = halfSpreadBps
-        additionalImpactBps = 0
-      }
     }
   }
 
@@ -640,76 +604,6 @@ function aggregateWallet(
     cancelTradeRatio: ctr,
     assetBreakdown: assetBreakdown.sort((a, b) => b.totalVolumeUsd - a.totalVolumeUsd),
     trades,
-  }
-}
-
-// ─── Live order book metrics ──────────────────────────────────────────────────
-
-export function computeOrderBookMetrics(
-  book: HLL2Book,
-  dayVolumeUsd: number,
-): OrderBookMetrics {
-  const bids = book.levels[0]
-  const asks = book.levels[1]
-
-  const bestBid = bids.length > 0 ? parseFloat(bids[0].px) : 0
-  const bestAsk = asks.length > 0 ? parseFloat(asks[0].px) : 0
-  const mid = (bestBid + bestAsk) / 2
-  const spreadBps = mid > 0 ? ((bestAsk - bestBid) / mid) * 10_000 : 0
-  const halfSpreadBps = spreadBps / 2
-
-  const topBidSz = bids.length > 0 ? parseFloat(bids[0].sz) : 0
-  const topAskSz = asks.length > 0 ? parseFloat(asks[0].sz) : 0
-  const topBidUsd = topBidSz * bestBid
-  const topAskUsd = topAskSz * bestAsk
-  const topDepth = topBidUsd + topAskUsd
-  const obi = topDepth > 0 ? (topBidUsd - topAskUsd) / topDepth : 0
-
-  function depthWithinBps(thresholdBps: number): number {
-    const maxDeviation = (thresholdBps / 10_000) * mid
-    let total = 0
-    for (const level of bids) {
-      const px = parseFloat(level.px)
-      if (mid - px > maxDeviation) break
-      total += parseFloat(level.sz) * px
-    }
-    for (const level of asks) {
-      const px = parseFloat(level.px)
-      if (px - mid > maxDeviation) break
-      total += parseFloat(level.sz) * px
-    }
-    return total
-  }
-
-  return {
-    coin: book.coin,
-    timestamp: book.time,
-    markPrice: mid,
-    bestBid,
-    bestAsk,
-    bidAskSpreadBps: spreadBps,
-    halfSpreadBps,
-    topBidSize: topBidSz,
-    topAskSize: topAskSz,
-    topOfBookDepthUsd: topDepth,
-    depth10Bps: depthWithinBps(10),
-    depth50Bps: depthWithinBps(50),
-    depth100Bps: depthWithinBps(100),
-    depth200Bps: depthWithinBps(200),
-    orderBookImbalance: obi,
-    dayVolumeUsd,
-  }
-}
-
-export async function fetchOrderBookMetrics(
-  coin: string,
-  dayVolumeUsd = 0,
-): Promise<OrderBookMetrics | null> {
-  try {
-    const book = await getL2Book(coin)
-    return computeOrderBookMetrics(book, dayVolumeUsd)
-  } catch {
-    return null
   }
 }
 
