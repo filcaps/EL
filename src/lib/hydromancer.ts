@@ -127,27 +127,22 @@ export async function buildSlippageCache(
       const key = `${coin}:${tier}`
       try {
         const allPoints: HMSlippagePoint[] = []
+        let cursor = startTime
 
-        const firstBatch = await getSlippageHistory({
-          coin,
-          amount: tier,
-          startTime,
-          endTime,
-          limit: 2000,
-        })
-        allPoints.push(...firstBatch)
-
-        // Page if the batch was full (there may be more)
-        if (firstBatch.length === 2000) {
-          const lastTs = firstBatch[firstBatch.length - 1].timestamp
-          const more = await getSlippageHistory({
+        // Paginate until we get a partial batch (< 2000), mirroring getAllUserFills logic.
+        // A 3-month window at 15-min intervals = ~8,640 points; must not stop after 2 pages.
+        while (true) {
+          const batch = await getSlippageHistory({
             coin,
             amount: tier,
-            startTime: lastTs + 1,
+            startTime: cursor,
             endTime,
             limit: 2000,
           })
-          allPoints.push(...more)
+          if (batch.length === 0) break
+          allPoints.push(...batch)
+          if (batch.length < 2000) break
+          cursor = batch[batch.length - 1].timestamp + 1
         }
 
         allPoints.sort((a, b) => a.timestamp - b.timestamp)

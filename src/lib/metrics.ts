@@ -166,69 +166,80 @@ export async function analyseWallet(
 
   // ── Spot / HIP-3 classification ───────────────────────────────────────────
   //
-  // Confirmed from the Hyperliquid API (empirically, Mar 2025):
-  //   • Perp fills    → plain ticker:   "BTC", "ETH", "HYPE", "PURR", …
-  //   • Spot fills    → always @N:       "@0", "@107", "@142", "@180", …
-  //                     (canonical PURR/USDC fills use "@0", not "PURR/USDC")
+  // HL fills use two coin formats:
+  //   • @N  — spot market index (e.g. "@0" = PURR/USDC, "@142" = UBTC).
+  //           Always unambiguously spot.
+  //   • Named — e.g. "BTC", "ETH" for perps; but ALSO "UBTC", "MON", "USDH"
+  //             for some HIP-3 spot fills when HL omits the @N encoding.
   //
-  // Therefore the authoritative rules are:
-  //   isSpot  = coin.startsWith('@') || coin.includes('/')
-  //             (the '/' guard catches any future "TOKEN/USDC" canonical format)
-  //   isHip3  = isSpot && NOT a canonical market index
-  //
-  // Named token strings (UBTC, HYPE, PURR) are NEVER fill coin values for spot.
-  // They only live in the spotMeta token list for display name resolution.
+  // For named coins we use fill.dir as tiebreaker:
+  //   dir "Buy" | "Sell"                  → spot fill
+  //   dir "Open Long" | "Close Short" …   → perp fill
 
-  // Map @N → human-readable display name (e.g. "@107" → "HYPE", "@0" → "PURR")
+  // Map any coin id → human-readable display name
   const spotCoinNames = new Map<string, string>()
-  // Map @N → the ticker the candle API wants
+  // Map any coin id → candle API ticker
   const spotCandleTickers = new Map<string, string>()
-  // Set of canonical @N keys (only PURR/USDC = "@0" today; future-proof)
+  // Canonical @N keys (PURR/USDC = "@0", HYPE/USDC = "@107", …)
   const canonicalSpotKeys = new Set<string>()
+  // Named tokens from non-canonical (HIP-3) spot markets, e.g. "UBTC", "MON"
+  const namedHip3Tokens = new Set<string>()
 
   if (rawSpotMeta) {
-    // Build token-index → token-name lookup
     const tokenNames = new Map<number, string>()
     for (const token of rawSpotMeta.tokens) {
       tokenNames.set(token.index, token.name as string)
     }
 
     for (const market of rawSpotMeta.universe) {
-      const fillKey = `@${market.index}` // e.g. "@0", "@107"
+      const fillKey = `@${market.index}`
 
       if (market.isCanonical) {
-        // Canonical spot (currently only PURR/USDC at index 0)
-        // Fills use "@0"; candle API needs the base ticker ("PURR")
         const baseTicker = (market.name as string).split('/')[0]
         spotCoinNames.set(fillKey, baseTicker)
         spotCandleTickers.set(fillKey, baseTicker)
-        // Also register the "TOKEN/USDC" format as a safety net
         spotCoinNames.set(market.name as string, baseTicker)
         spotCandleTickers.set(market.name as string, baseTicker)
         canonicalSpotKeys.add(fillKey)
       } else {
-        // Non-canonical (HIP-3): resolve @N → token name for display
+        // HIP-3: @N fill key + possibly named format (e.g. "UBTC")
         const displayName = tokenNames.get((market.tokens as number[])[0]) ?? fillKey
         spotCoinNames.set(fillKey, displayName)
-        // Candle API: non-canonical markets accept @N directly
         spotCandleTickers.set(fillKey, fillKey)
+
+        if (displayName !== fillKey) {
+          // Register named format so fills with coin="UBTC" resolve correctly
+          spotCoinNames.set(displayName, displayName)
+          spotCandleTickers.set(displayName, fillKey) // candle API needs @N
+          namedHip3Tokens.add(displayName)
+        }
       }
     }
   }
 
   /**
-   * Spot: coin starts with "@" (all HL spot fills) OR contains "/" (canonical format safety-net)
-   * This never misclassifies perp coins (plain tickers like "BTC", "HYPE") as spot.
+   * Returns true when a fill coin represents a spot market.
+   * Pass fill.dir so named-format HIP-3 tokens (UBTC, MON…) are resolved via
+   * trade direction rather than coin string alone.
    */
-  const isSpotCoin = (coin: string): boolean =>
-    coin.startsWith('@') || coin.includes('/')
+  const isSpotCoin = (coin: string, dir?: string): boolean => {
+    if (coin.startsWith('@') || coin.includes('/')) return true
+    // Named HIP-3 token registered from spot meta
+    if (namedHip3Tokens.has(coin)) return dir === 'Buy' || dir === 'Sell'
+    // Defensive: plain name not in spot meta — use dir if available, default perp
+    if (dir === 'Buy' || dir === 'Sell') return true
+    return false
+  }
 
   /**
-   * HIP-3: a spot coin that is NOT one of the canonical market indices.
-   * Currently: every @N except @0 (PURR/USDC).
+   * Returns true for non-canonical (HIP-3) spot markets.
    */
-  const isHip3Coin = (coin: string): boolean =>
-    coin.startsWith('@') && !canonicalSpotKeys.has(coin)
+  const isHip3Coin = (coin: string, dir?: string): boolean => {
+    if (coin.startsWith('@')) return !canonicalSpotKeys.has(coin)
+    // Named format: it's a spot fill and not a canonical "X/Y" token
+    if (namedHip3Tokens.has(coin)) return dir === 'Buy' || dir === 'Sell'
+    return false
+  }
 
   // 3 ── Group fills by coin; compute per-fill notional tiers ────────────────
   const coinGroups = groupByCoin(recentFills)
@@ -239,7 +250,7 @@ export async function analyseWallet(
   const seenPairs = new Set<string>()
 
   for (const fill of recentFills) {
-    if (isSpotCoin(fill.coin)) continue
+    if (isSpotCoin(fill.coin, fill.dir)) continue
     const notional = parseFloat(fill.px) * parseFloat(fill.sz)
     const tier = closestTier(notional)
     fillTiers.set(fill.tid, tier)
@@ -297,7 +308,7 @@ export async function analyseWallet(
   // 6 ── Compute per-trade metrics ────────────────────────────────────────────
   progress('Computing execution metrics…')
   const tradeMetrics: TradeExecutionMetrics[] = recentFills.map((fill) =>
-    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, spotCoinNames, isSpotCoin, isHip3Coin),
+    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, spotCoinNames, isSpotCoin, isHip3Coin, fill.dir),
   )
 
   // 8 ── Cancel / trade ratio (windowed to fills time range) (fix #6) ────────
@@ -351,8 +362,9 @@ function computeTradeMetrics(
   candleMaps: Map<string, Map<number, HLCandle>>,
   slippageCache: SlippageCache,
   spotCoinNames: Map<string, string>,
-  isSpotCoin: (coin: string) => boolean,
-  isHip3Coin: (coin: string) => boolean,
+  isSpotCoin: (coin: string, dir?: string) => boolean,
+  isHip3Coin: (coin: string, dir?: string) => boolean,
+  dir?: string,
 ): TradeExecutionMetrics {
   const fillPx = parseFloat(fill.px)
   const sz = parseFloat(fill.sz)
@@ -361,8 +373,8 @@ function computeTradeMetrics(
   const builderFeeUsd = fill.builderFee ? parseFloat(fill.builderFee) : 0
   const side: 'buy' | 'sell' = fill.side === 'B' ? 'buy' : 'sell'
   const isTaker = fill.crossed
-  const isSpot = isSpotCoin(fill.coin)
-  const isHip3 = isHip3Coin(fill.coin)
+  const isSpot = isSpotCoin(fill.coin, dir)
+  const isHip3 = isHip3Coin(fill.coin, dir)
 
   // ── Candle-based mid prices ──────────────────────────────────────────────
   let midAtTrade: number | null = null
