@@ -91,11 +91,11 @@
   }
 
   .td {
-    @apply px-3 py-3 text-sm font-mono text-text-secondary border-b border-border-subtle;
+    @apply px-3 py-3 text-sm font-mono text-text-secondary border-b border-border-subtle align-top;
   }
 
   .td-primary {
-    @apply px-3 py-3 text-sm font-mono text-text-primary border-b border-border-subtle;
+    @apply px-3 py-3 text-sm font-mono text-text-primary border-b border-border-subtle align-top;
   }
 
   .btn-primary {
@@ -122,7 +122,7 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #3b82f6;
+  background: #235051;
   border: 2px solid #000;
   cursor: pointer;
   position: relative;
@@ -133,7 +133,7 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #3b82f6;
+  background: #235051;
   border: 2px solid #000;
   cursor: pointer;
 }

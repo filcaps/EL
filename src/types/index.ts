@@ -106,6 +106,7 @@ export interface TradeExecutionMetrics {
   coin: string        // raw API name (e.g. "@260" for spot, "BTC" for perp)
   coinDisplay: string // human-readable name (e.g. "BTC" resolved from spot index)
   isSpot: boolean     // true for spot markets (coin starts with "@" or named token)
+  isHip3: boolean     // true for non-canonical (HIP-3) spot tokens
   side: TradeSide
   direction: string
   isTaker: boolean

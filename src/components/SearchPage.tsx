@@ -24,18 +24,24 @@ export function SearchPage({ onAnalyse, loading }: SearchPageProps) {
     <div className="min-h-[calc(100vh-56px)] flex flex-col items-center justify-center px-6 py-20">
       {/* Hero */}
       <div className="text-center mb-12 max-w-xl">
-        <div className="flex items-center justify-center gap-2 mb-8">
-          <div className="w-10 h-10 bg-accent-blue rounded-full flex items-center justify-center">
-            <span className="text-white text-base font-bold leading-none">Q</span>
+        {/* Logo mark */}
+        <div className="flex items-center justify-center mb-8">
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: '#235051' }}>
+            <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="5" cy="5" r="4.5" fill="white" fillOpacity="0.9" />
+              <path d="M1.5 9 Q1 14 3.5 18" stroke="white" strokeOpacity="0.9" strokeWidth="2.5" strokeLinecap="round" />
+              <circle cx="19" cy="5" r="4.5" fill="white" fillOpacity="0.6" />
+              <path d="M15.5 9 Q15 14 17.5 18" stroke="white" strokeOpacity="0.6" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
           </div>
         </div>
 
         <h1 className="text-3xl font-semibold text-text-primary mb-3 tracking-tight">
-          Execution Analytics
+          Quote Execution Alpha
         </h1>
         <p className="text-text-secondary text-sm leading-relaxed">
-          Quantify the true cost of your trades on Hyperliquid. Spread, market impact,
-          and arrival cost — decomposed in basis points across your full history.
+          Measure the true cost of every fill on Hyperliquid. Spread, market impact, and fees
+          decomposed into basis points — across your complete trade history.
         </p>
       </div>
 
@@ -47,7 +53,8 @@ export function SearchPage({ onAnalyse, loading }: SearchPageProps) {
             className="w-full flex items-center justify-center gap-2.5 py-3 rounded-lg border border-accent-blue/40 bg-accent-blue/10 text-accent-blue text-sm font-medium hover:bg-accent-blue/20 transition-colors"
           >
             <Wallet className="w-4 h-4" />
-            Connect Wallet to analyse your trades
+            Connect Wallet
+            <span className="text-xs font-normal opacity-60 ml-0.5">via Privy</span>
           </button>
         )}
 
@@ -69,7 +76,7 @@ export function SearchPage({ onAnalyse, loading }: SearchPageProps) {
         {/* Divider */}
         <div className="flex items-center gap-3">
           <div className="flex-1 h-px bg-border" />
-          <span className="text-xs text-text-dim">or enter any address</span>
+          <span className="text-xs text-text-dim">or</span>
           <div className="flex-1 h-px bg-border" />
         </div>
 
@@ -103,24 +110,24 @@ export function SearchPage({ onAnalyse, loading }: SearchPageProps) {
         </form>
 
         <p className="text-xs text-text-muted text-center">
-          Powered by Hyperliquid · Hydromancer
+          Powered by HyperCore data
         </p>
       </div>
 
       {/* Feature grid */}
       <div className="mt-14 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl w-full">
         <FeatureCard
-          icon={<Activity className="w-4 h-4 text-accent-blue" />}
+          icon={<Activity className="w-4 h-4" style={{ color: '#235051' }} />}
           title="Execution Cost"
           body="Spread, market impact, and fees decomposed into basis points per trade."
         />
         <FeatureCard
-          icon={<BarChart2 className="w-4 h-4 text-accent-purple" />}
+          icon={<BarChart2 className="w-4 h-4" style={{ color: '#235051' }} />}
           title="Historical Slippage"
-          body="15-minute sampled data from Hydromancer matched to each fill."
+          body="Historical sampled data matched to each fill."
         />
         <FeatureCard
-          icon={<Layers className="w-4 h-4 text-accent-cyan" />}
+          icon={<Layers className="w-4 h-4" style={{ color: '#235051' }} />}
           title="Asset Breakdown"
           body="Per-market analysis with volume, fees, spread, and arrival cost."
         />

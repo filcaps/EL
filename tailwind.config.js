@@ -24,8 +24,8 @@ export default {
           dim: '#333333',
         },
         accent: {
-          blue: '#3B82F6',
-          'blue-dim': '#1D4ED8',
+          blue: '#235051',
+          'blue-dim': '#1a3c3d',
           cyan: '#06B6D4',
           purple: '#8B5CF6',
         },

@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import type { AssetSummary } from '../types'
 import { fmtBps, fmtUsd, bpsColorClass } from '../lib/metrics'
 import { ChevronRight, Search, X } from 'lucide-react'
+import { CoinIcon } from './CoinIcon'
 
 interface AssetBreakdownProps {
   assets: AssetSummary[]
@@ -151,9 +152,10 @@ export function AssetBreakdown({ assets, onSelectAsset }: AssetBreakdownProps) {
                       href={url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="hover:text-text-primary transition-colors"
+                      className="flex items-center gap-1.5 hover:text-text-primary transition-colors"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      <CoinIcon symbol={a.displayName} size={16} />
                       {a.displayName}
                     </a>
                   </td>

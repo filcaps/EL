@@ -4,10 +4,11 @@ import { ChevronDown, ChevronUp, ChevronRight, SlidersHorizontal, X } from 'luci
 import type { TradeExecutionMetrics } from '../types'
 import type { BuilderFeeMap, BuilderFeeEntry } from '../App'
 import { fmtBps, fmtUsd } from '../lib/metrics'
+import { CoinIcon } from './CoinIcon'
 
 type SortKey = keyof TradeExecutionMetrics
 type SortDir = 'asc' | 'desc'
-type MarketType = 'all' | 'spot' | 'perp'
+type MarketType = 'all' | 'spot' | 'perp' | 'hip-3'
 
 interface TradeTableProps {
   trades: TradeExecutionMetrics[]
@@ -20,6 +21,19 @@ function fmtSliderValue(v: number): string {
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
   if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
   return `$${v.toFixed(0)}`
+}
+
+/** Render bps on top, $ value below in muted smaller text */
+function BpsCell({ bps, usd }: { bps: number | null; usd: number | null }) {
+  if (bps === null) return <span className="text-text-muted">—</span>
+  return (
+    <div>
+      <div>{fmtBps(bps)}</div>
+      {usd !== null && (
+        <div className="text-xs text-text-muted">{fmtUsd(usd)}</div>
+      )}
+    </div>
+  )
 }
 
 export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }: TradeTableProps) {
@@ -74,6 +88,7 @@ export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }:
       if (filterCoin && t.coin !== filterCoin) return false
       if (marketType === 'spot' && !t.isSpot) return false
       if (marketType === 'perp' && t.isSpot) return false
+      if (marketType === 'hip-3' && !t.isHip3) return false
       if (minValue > 0 && t.notionalUsd < minValue) return false
       if (maxValue < Infinity && t.notionalUsd > maxValue) return false
       return true
@@ -93,6 +108,13 @@ export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }:
 
   const pageCount = Math.ceil(sorted.length / PAGE_SIZE)
   const paginated = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+
+  const marketTypeOptions: Array<{ key: MarketType; label: string }> = [
+    { key: 'all', label: 'All' },
+    { key: 'spot', label: 'Spot' },
+    { key: 'perp', label: 'Perp' },
+    { key: 'hip-3', label: 'HIP-3' },
+  ]
 
   return (
     <div className="card">
@@ -136,17 +158,17 @@ export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }:
             <div>
               <div className="text-xs text-text-muted mb-2">Market type</div>
               <div className="flex rounded overflow-hidden border border-border">
-                {(['all', 'spot', 'perp'] as MarketType[]).map((type) => (
+                {marketTypeOptions.map(({ key, label }) => (
                   <button
-                    key={type}
-                    onClick={() => { setMarketType(type); setPage(0) }}
-                    className={`px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
-                      marketType === type
+                    key={key}
+                    onClick={() => { setMarketType(key); setPage(0) }}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      marketType === key
                         ? 'bg-accent-blue text-white'
                         : 'bg-surface-1 text-text-muted hover:text-text-secondary'
                     }`}
                   >
-                    {type}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -302,12 +324,28 @@ function TradeRow({
   builderFeeEntry: BuilderFeeEntry | null
   onClick: () => void
 }) {
+  const notional = t.notionalUsd
+
+  const spreadUsd = t.halfSpreadBps !== null ? (t.halfSpreadBps * 2 * notional) / 10_000 : null
+  const slippageUsd = t.slippageBps !== null ? (t.slippageBps * notional) / 10_000 : null
+  const impactUsd = t.additionalImpactBps !== null ? (t.additionalImpactBps * notional) / 10_000 : null
+  const builderBps =
+    builderFeeEntry && builderFeeEntry.feeUsd > 0 && notional > 0
+      ? (builderFeeEntry.feeUsd / notional) * 10_000
+      : null
+
   return (
     <tr className="table-row-hover" onClick={onClick}>
       <td className="td font-mono text-xs whitespace-nowrap">
-        {format(new Date(t.timestamp), 'MMM d, HH:mm:ss')}
+        <div>{format(new Date(t.timestamp), 'MMM d, yyyy')}</div>
+        <div className="text-text-muted">{format(new Date(t.timestamp), 'HH:mm:ss')}</div>
       </td>
-      <td className="td-primary font-semibold">{t.coinDisplay}</td>
+      <td className="td-primary font-semibold">
+        <div className="flex items-center gap-1.5">
+          <CoinIcon symbol={t.coinDisplay} size={16} />
+          {t.coinDisplay}
+        </div>
+      </td>
       <td className="td">
         {t.side === 'buy' ? (
           <span className="tag-buy">BUY</span>
@@ -332,19 +370,23 @@ function TradeRow({
         ${t.fillPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
       </td>
       <td className="td text-right text-text-secondary">
-        {t.halfSpreadBps !== null ? fmtBps(t.halfSpreadBps * 2) : '—'}
+        <BpsCell bps={t.halfSpreadBps !== null ? t.halfSpreadBps * 2 : null} usd={spreadUsd} />
       </td>
       <td className="td text-right text-text-secondary">
-        {fmtBps(t.slippageBps)}
+        <BpsCell bps={t.slippageBps} usd={slippageUsd} />
       </td>
       <td className="td text-right text-text-secondary">
-        {fmtBps(t.additionalImpactBps)}
+        <BpsCell bps={t.additionalImpactBps} usd={impactUsd} />
       </td>
       <td className="td text-right text-text-secondary">
-        {fmtBps(t.feeBps)}
+        <BpsCell bps={t.feeBps} usd={t.fee} />
       </td>
       <td className="td text-right text-text-secondary">
-        {builderFeeEntry && builderFeeEntry.feeUsd > 0 ? fmtUsd(builderFeeEntry.feeUsd) : '—'}
+        {builderBps !== null ? (
+          <BpsCell bps={builderBps} usd={builderFeeEntry!.feeUsd} />
+        ) : (
+          <span className="text-text-muted">—</span>
+        )}
       </td>
       <td className="td text-right">
         <ChevronRight className="w-3.5 h-3.5 text-text-muted ml-auto" />

@@ -189,6 +189,8 @@ export async function analyseWallet(
 
   // Step C: comprehensive spot id set — everything we can possibly see in fills
   const spotCoinSet = new Set<string>()
+  // HIP-3 = non-canonical spot tokens
+  const hip3CoinSet = new Set<string>()
 
   if (rawSpotMeta) {
     // token index → token name  (e.g. 197 → "UBTC")
@@ -217,16 +219,18 @@ export async function analyseWallet(
           if (!perpCoinSet.has(id)) spotCoinSet.add(id)
         }
       } else {
-        // Non-canonical: market.name is just "@N" again
+        // Non-canonical (HIP-3): market.name is just "@N" again
         const displayName = tokenNames.get((market.tokens as number[])[0]) ?? (market.name as string)
         // @N format — candle API accepts @N directly
         spotCoinNames.set(fillKey, displayName)
         spotCandleTickers.set(fillKey, fillKey)
+        hip3CoinSet.add(fillKey)
         // Named format ("UBTC") — candle API rejects this; resolve to @N
         if (displayName !== fillKey) {
           spotCoinNames.set(displayName, displayName)
           spotCandleTickers.set(displayName, fillKey)
           if (!perpCoinSet.has(displayName)) spotCoinSet.add(displayName)
+          hip3CoinSet.add(displayName)
         }
       }
     }
@@ -240,6 +244,9 @@ export async function analyseWallet(
    */
   const isSpotCoin = (coin: string): boolean =>
     coin.startsWith('@') || spotCoinSet.has(coin)
+
+  const isHip3Coin = (coin: string): boolean =>
+    hip3CoinSet.has(coin)
 
   // 3 ── Group fills by coin; compute per-fill notional tiers ────────────────
   const coinGroups = groupByCoin(recentFills)
@@ -323,7 +330,7 @@ export async function analyseWallet(
   // 7 ── Compute per-trade metrics ───────────────────────────────────────────
   progress('Computing execution metrics…')
   const tradeMetrics: TradeExecutionMetrics[] = recentFills.map((fill) =>
-    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, liveBooks, spotCoinNames, isSpotCoin),
+    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, liveBooks, spotCoinNames, isSpotCoin, isHip3Coin),
   )
 
   // 8 ── Cancel / trade ratio (windowed to fills time range) (fix #6) ────────
@@ -379,6 +386,7 @@ function computeTradeMetrics(
   liveBooks: Map<string, HLL2Book>,
   spotCoinNames: Map<string, string>,
   isSpotCoin: (coin: string) => boolean,
+  isHip3Coin: (coin: string) => boolean,
 ): TradeExecutionMetrics {
   const fillPx = parseFloat(fill.px)
   const sz = parseFloat(fill.sz)
@@ -388,6 +396,7 @@ function computeTradeMetrics(
   const side: 'buy' | 'sell' = fill.side === 'B' ? 'buy' : 'sell'
   const isTaker = fill.crossed
   const isSpot = isSpotCoin(fill.coin)
+  const isHip3 = isHip3Coin(fill.coin)
 
   // ── Candle-based mid prices ──────────────────────────────────────────────
   let midAtTrade: number | null = null
@@ -496,6 +505,7 @@ function computeTradeMetrics(
     coin: fill.coin,
     coinDisplay: spotCoinNames.get(fill.coin) ?? fill.coin,
     isSpot,
+    isHip3,
     side,
     direction: fill.dir,
     isTaker,
@@ -746,9 +756,10 @@ export function fmtBps(v: number | null, decimals = 2): string {
 }
 
 export function fmtUsd(v: number, decimals = 2): string {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(1)}K`
-  return `$${v.toFixed(decimals)}`
+  const abs = Math.abs(v)
+  const prefix = v < 0 ? '-$' : '$'
+  if (abs >= 1_000_000) return `${prefix}${(abs / 1_000_000).toFixed(2)}M`
+  return `${prefix}${abs.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
 }
 
 export function bpsColorClass(

@@ -26,10 +26,10 @@ export function Header({ onReset, walletAddress }: HeaderProps) {
           >
             {/* Quote logo — two stylised open quotation marks */}
             <svg width="26" height="18" viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="4.5" cy="4.5" r="4" fill="#9ca3af" />
-              <path d="M1 8 Q0.5 12 2.5 16" stroke="#9ca3af" strokeWidth="2.5" strokeLinecap="round" />
-              <circle cx="17.5" cy="4.5" r="4" fill="#6b7280" />
-              <path d="M14 8 Q13.5 12 15.5 16" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" />
+              <circle cx="4.5" cy="4.5" r="4" fill="#235051" />
+              <path d="M1 8 Q0.5 12 2.5 16" stroke="#235051" strokeWidth="2.5" strokeLinecap="round" />
+              <circle cx="17.5" cy="4.5" r="4" fill="#235051" fillOpacity="0.6" />
+              <path d="M14 8 Q13.5 12 15.5 16" stroke="#235051" strokeOpacity="0.6" strokeWidth="2.5" strokeLinecap="round" />
             </svg>
             <span className="text-sm font-semibold text-text-primary tracking-tight">Quote</span>
           </button>
