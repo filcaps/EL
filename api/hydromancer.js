@@ -7,29 +7,27 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  // Accept either name — the server-side key should be set WITHOUT the VITE_
-  // prefix in Vercel (so it never ends up in the client bundle). The VITE_
-  // fallback keeps local dev working without extra configuration.
   const apiKey = process.env.HYDROMANCER_API_KEY ?? process.env.VITE_HYDROMANCER_API_KEY
   if (!apiKey) {
     return res.status(500).json({ error: 'Hydromancer API key not configured' })
   }
 
   try {
+    // req.body may be a parsed object (Vercel auto-parses JSON) or a raw string
+    const bodyStr = typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {})
+
     const upstream = await fetch('https://api.hydromancer.xyz/info', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(req.body),
+      body: bodyStr,
     })
 
     const text = await upstream.text()
-    res
-      .status(upstream.status)
-      .setHeader('Content-Type', 'application/json')
-      .send(text)
+    res.setHeader('Content-Type', 'application/json')
+    res.status(upstream.status).send(text)
   } catch (err) {
     res.status(502).json({ error: 'Upstream request failed', detail: String(err) })
   }

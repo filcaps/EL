@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/hydromancer.js": {
+      "runtime": "nodejs20.x"
+    }
+  }
+}
