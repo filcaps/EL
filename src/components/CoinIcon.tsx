@@ -5,7 +5,6 @@ interface CoinIconProps {
   size?: number
 }
 
-// Normalise symbol to lowercase filename key (strips "/" etc.)
 function toKey(symbol: string): string {
   return symbol.split('/')[0].toLowerCase()
 }
@@ -21,21 +20,29 @@ function avatarColor(symbol: string): string {
   return COLORS[h % COLORS.length]
 }
 
-export function CoinIcon({ symbol, size = 20 }: CoinIconProps) {
-  // Three-stage fallback: local asset → CDN → coloured avatar
-  const key = toKey(symbol)
-  const localUrl = `/coins/${key}.png`
-  const cdnUrl = `https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/128/color/${key}.png`
+const CDN = 'https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/128/color'
 
-  const [src, setSrc] = useState(localUrl)
+function buildUrls(key: string): string[] {
+  const urls: string[] = [`/coins/${key}.png`]
+  // For U-prefixed bridged tokens (ubtc, ueth, usol…), try the base asset icon locally
+  if (key.startsWith('u') && key.length > 2) {
+    urls.push(`/coins/${key.slice(1)}.png`)
+  }
+  urls.push(`${CDN}/${key}.png`)
+  return urls
+}
+
+export function CoinIcon({ symbol, size = 20 }: CoinIconProps) {
+  const key = toKey(symbol)
+  const urls = buildUrls(key)
+
+  const [idx, setIdx] = useState(0)
   const [failed, setFailed] = useState(false)
 
   function handleError() {
-    if (src === localUrl) {
-      // Try CDN next
-      setSrc(cdnUrl)
+    if (idx + 1 < urls.length) {
+      setIdx(idx + 1)
     } else {
-      // Both failed — show avatar
       setFailed(true)
     }
   }
@@ -58,7 +65,7 @@ export function CoinIcon({ symbol, size = 20 }: CoinIconProps) {
 
   return (
     <img
-      src={src}
+      src={urls[idx]}
       alt={symbol}
       width={size}
       height={size}
