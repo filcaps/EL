@@ -24,9 +24,13 @@ const CDN = 'https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/128/color'
 
 function buildUrls(key: string): string[] {
   const urls: string[] = [`/coins/${key}.png`]
-  // For U-prefixed bridged tokens (ubtc, ueth, usol…), try the base asset icon locally
+  // U-prefixed bridged tokens: ubtc → btc, ueth → eth, usol → sol…
   if (key.startsWith('u') && key.length > 2) {
     urls.push(`/coins/${key.slice(1)}.png`)
+  }
+  // 0/1-suffixed bridged DeFi tokens: aave0 → aave, bnb0 → bnb, xmr1 → xmr…
+  if ((key.endsWith('0') || key.endsWith('1')) && key.length > 2) {
+    urls.push(`/coins/${key.slice(0, -1)}.png`)
   }
   urls.push(`${CDN}/${key}.png`)
   return urls
