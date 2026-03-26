@@ -138,8 +138,11 @@ export async function analyseWallet(
   )
   if (rawFills.length === 0) return emptyWallet(address)
 
-  // Sort newest-first
-  const fills = [...rawFills].sort((a, b) => b.time - a.time)
+  // Sort newest-first; drop dust fills (notional < $10)
+  const MIN_NOTIONAL_USD = 10
+  const fills = [...rawFills]
+    .sort((a, b) => b.time - a.time)
+    .filter((f) => parseFloat(f.px) * parseFloat(f.sz) >= MIN_NOTIONAL_USD)
   const recentFills = fills
 
   const minFillTime = arrayMin(recentFills.map((f) => f.time))
