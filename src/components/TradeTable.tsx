@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { format } from 'date-fns'
-import { ChevronDown, ChevronUp, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronRight, SlidersHorizontal, X, Search } from 'lucide-react'
 import type { TradeExecutionMetrics } from '../types'
 import type { BuilderFeeMap, BuilderFeeEntry } from '../App'
 import { fmtBps, fmtUsd } from '../lib/metrics'
@@ -47,6 +47,9 @@ export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }:
   const [marketType, setMarketType] = useState<MarketType>('all')
   const [minValue, setMinValue] = useState(0)
   const [maxValue, setMaxValue] = useState(Infinity)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showSearch, setShowSearch] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   // Global bounds from all trades (ignoring coin filter)
   const { globalMax } = useMemo(() => {
@@ -72,6 +75,17 @@ export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }:
     setMaxValue(Infinity)
   }
 
+  function toggleSearch() {
+    if (showSearch) {
+      setShowSearch(false)
+      setSearchQuery('')
+    } else {
+      setShowSearch(true)
+      setTimeout(() => searchInputRef.current?.focus(), 50)
+    }
+    setPage(0)
+  }
+
   function handleSort(key: SortKey) {
     if (key === sortKey) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -84,16 +98,18 @@ export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }:
 
   // ── Filtering ─────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
     return trades.filter((t) => {
       if (filterCoin && t.coin !== filterCoin) return false
       if (marketType === 'spot' && !t.isSpot) return false
-      if (marketType === 'perp' && t.isSpot) return false
+      if (marketType === 'perp' && (t.isSpot || t.isHip3)) return false
       if (marketType === 'hip-3' && !t.isHip3) return false
       if (minValue > 0 && t.notionalUsd < minValue) return false
       if (maxValue < Infinity && t.notionalUsd > maxValue) return false
+      if (q && !t.coinDisplay.toLowerCase().includes(q) && !t.coin.toLowerCase().includes(q)) return false
       return true
     })
-  }, [trades, filterCoin, marketType, minValue, maxValue])
+  }, [trades, filterCoin, marketType, minValue, maxValue, searchQuery])
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -122,8 +138,34 @@ export function TradeTable({ trades, builderFeeMap, onSelectTrade, filterCoin }:
         <span className="card-title">
           Trade History {filterCoin ? `— ${filterCoin}` : ''}
         </span>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <span className="text-xs text-text-muted">{filtered.length} trades</span>
+
+          {/* Search */}
+          <div className="flex items-center">
+            {showSearch && (
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => { setSearchQuery(e.target.value); setPage(0) }}
+                onKeyDown={(e) => e.key === 'Escape' && toggleSearch()}
+                placeholder="Search asset…"
+                className="w-32 px-2 py-1 text-xs bg-surface-2 border border-border rounded-l focus:outline-none focus:border-accent-blue/60 text-text-primary placeholder:text-text-muted"
+              />
+            )}
+            <button
+              onClick={toggleSearch}
+              className={`flex items-center justify-center px-2 py-1 rounded${showSearch ? '-r' : ''} text-xs transition-colors ${
+                showSearch || searchQuery
+                  ? 'bg-accent-blue/20 text-accent-blue border border-accent-blue/40 border-l-0'
+                  : 'btn-ghost'
+              }`}
+            >
+              <Search className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
           <button
             onClick={() => setShowFilters((s) => !s)}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors ${

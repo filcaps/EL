@@ -16,6 +16,7 @@ export function TradeDetail({ trade: t, builderFeeEntry, onClose }: TradeDetailP
   const [copied, setCopied] = useState(false)
 
   const isZeroHash = /^0x0+$/.test(t.hash)
+  const isDustConversion = t.tid === 0 && isZeroHash
   const displayHash = isZeroHash ? null : t.hash
 
   function copyHash() {
@@ -46,7 +47,7 @@ export function TradeDetail({ trade: t, builderFeeEntry, onClose }: TradeDetailP
               title="Copy transaction hash"
             >
               <span className="font-mono text-xs text-text-muted truncate max-w-[220px]">
-                {displayHash ?? `TID: ${t.tid}`}
+                {displayHash ?? (isDustConversion ? 'Dust Conversion' : `TID: ${t.tid}`)}
               </span>
               {copied
                 ? <Check className="w-3 h-3 text-pos shrink-0" />

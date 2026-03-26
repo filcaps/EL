@@ -176,14 +176,34 @@ export async function analyseWallet(
   //   dir "Buy" | "Sell"                  → spot fill
   //   dir "Open Long" | "Close Short" …   → perp fill
 
+  // HIP-3 = RWA perp markets: stocks, ETFs, indices, commodities, forex
+  // These trade like perps (dir = "Open Long" / "Close Short" etc.)
+  // but on real-world assets. Spot fills for the same ticker (dir = "Buy"/"Sell")
+  // are classified as regular Spot, NOT HIP-3.
+  const HIP3_TOKENS = new Set([
+    // Stocks (US + international)
+    'AAPL', 'AMD', 'AMZN', 'BABA', 'CLX', 'COIN', 'CRWV', 'GOOGL', 'HOOD',
+    'HYUNDAI', 'INTC', 'META', 'MSFT', 'MU', 'N', 'NFLX', 'NVDA', 'ORCL',
+    'PLTR', 'RIVN', 'RTX', 'SNDK', 'TSLA', 'TSMS',
+    // Other HL RWA tickers
+    'BMNR', 'CRC', 'KHX', 'LM', 'SMS', 'STR', 'UEWY', 'USAR', 'YZ',
+    // Commodities
+    '100BRENT', 'COPPER', 'GOLD', 'NATGAS', 'OIL', 'PALLADIUM', 'PLATINUM',
+    'SILVER', 'USOIL', 'WTI',
+    // Indices
+    'SMALL2000', 'US500', 'USA500', 'USENERGY', 'USTECH',
+    // Forex
+    'EURUSD', 'JPY',
+    // ETFs / funds
+    'EWJ', 'EWYM', 'GLD', 'MINE', 'SEMI', 'URNM', 'USBOND',
+  ])
+
   // Map any coin id → human-readable display name
   const spotCoinNames = new Map<string, string>()
   // Map any coin id → candle API ticker
   const spotCandleTickers = new Map<string, string>()
   // Canonical @N keys (PURR/USDC = "@0", HYPE/USDC = "@107", …)
   const canonicalSpotKeys = new Set<string>()
-  // Named tokens from non-canonical (HIP-3) spot markets, e.g. "UBTC", "MON"
-  const namedHip3Tokens = new Set<string>()
 
   if (rawSpotMeta) {
     const tokenNames = new Map<number, string>()
@@ -202,43 +222,50 @@ export async function analyseWallet(
         spotCandleTickers.set(market.name as string, baseTicker)
         canonicalSpotKeys.add(fillKey)
       } else {
-        // HIP-3: @N fill key + possibly named format (e.g. "UBTC")
         const displayName = tokenNames.get((market.tokens as number[])[0]) ?? fillKey
         spotCoinNames.set(fillKey, displayName)
         spotCandleTickers.set(fillKey, fillKey)
 
         if (displayName !== fillKey) {
-          // Register named format so fills with coin="UBTC" resolve correctly
           spotCoinNames.set(displayName, displayName)
           spotCandleTickers.set(displayName, fillKey) // candle API needs @N
-          namedHip3Tokens.add(displayName)
         }
       }
     }
   }
 
-  /**
-   * Returns true when a fill coin represents a spot market.
-   * Pass fill.dir so named-format HIP-3 tokens (UBTC, MON…) are resolved via
-   * trade direction rather than coin string alone.
-   */
-  const isSpotCoin = (coin: string, dir?: string): boolean => {
-    if (coin.startsWith('@') || coin.includes('/')) return true
-    // Named HIP-3 token registered from spot meta
-    if (namedHip3Tokens.has(coin)) return dir === 'Buy' || dir === 'Sell'
-    // Defensive: plain name not in spot meta — use dir if available, default perp
-    if (dir === 'Buy' || dir === 'Sell') return true
-    return false
+  /** True for spot-style dir values. Case-insensitive to handle HL API variance. */
+  const isSpotDir = (dir?: string) => {
+    if (!dir) return false
+    const d = dir.toLowerCase()
+    return d === 'buy' || d === 'sell' || d.startsWith('spot ')
   }
 
   /**
-   * Returns true for non-canonical (HIP-3) spot markets.
+   * Returns true when a fill is from a spot market.
+   * Three sources of truth (checked in order):
+   *  1. @N or "/" coin format → unambiguously spot
+   *  2. Coin is in spotCoinNames but NOT in HIP3_TOKENS → spot-only token
+   *     (UBTC, MON, USDH…); classified as spot regardless of dir because
+   *     HL's dir can be inconsistent for named-format spot fills
+   *  3. dir is "buy", "sell", or starts with "spot " → spot
+   */
+  const isSpotCoin = (coin: string, dir?: string): boolean => {
+    if (coin.startsWith('@') || coin.includes('/')) return true
+    if (spotCoinNames.has(coin) && !HIP3_TOKENS.has(coin)) return true
+    return isSpotDir(dir)
+  }
+
+  /**
+   * Returns true for HIP-3 markets (RWA perps: stocks, ETFs, commodities, forex, indices).
+   * HIP-3 fills are perp-style (dir ≠ spot) on RWA tickers.
+   * Spot fills on the same ticker (e.g. HOOD/USDC) are NOT HIP-3 — they are Spot.
    */
   const isHip3Coin = (coin: string, dir?: string): boolean => {
-    if (coin.startsWith('@')) return !canonicalSpotKeys.has(coin)
-    // Named format: it's a spot fill and not a canonical "X/Y" token
-    if (namedHip3Tokens.has(coin)) return dir === 'Buy' || dir === 'Sell'
-    return false
+    if (isSpotDir(dir)) return false
+    if (coin.startsWith('@') || coin.includes('/')) return false
+    if (spotCoinNames.has(coin) && !HIP3_TOKENS.has(coin)) return false
+    return HIP3_TOKENS.has(coin)
   }
 
   // 3 ── Group fills by coin; compute per-fill notional tiers ────────────────
