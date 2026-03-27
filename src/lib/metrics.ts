@@ -385,6 +385,114 @@ function findNearestCandle(
   return null
 }
 
+// ─── Candle-based slippage fallback ──────────────────────────────────────────
+
+/**
+ * Estimates halfSpreadBps, slippageBps, and additionalImpactBps from 1-min OHLCV
+ * candle data when Hydromancer data is unavailable.
+ *
+ * ── Methods ──────────────────────────────────────────────────────────────────
+ *
+ * halfSpreadBps — two-stage estimate:
+ *   1. Roll (1984) autocovariance estimator.
+ *      Uses the first-order autocovariance of consecutive candle close changes:
+ *        halfSpread = √(−Cov(Δclose_t, Δclose_{t+1}))   [when Cov < 0]
+ *      A negative autocovariance in price changes is the signature of bid-ask
+ *      bounce: buys push the price up, sells push it down, creating mean-reversion.
+ *
+ *   2. Amihud-Roll range estimator (fallback when Roll gives Cov ≥ 0).
+ *      In a market with n_trades per candle, the 1-min high-low range contains
+ *      both price drift AND spread bounce. The spread's contribution to the range
+ *      scales as halfSpread × √n_trades (Madhavan 2000), so:
+ *        halfSpread_raw ≈ (H − L) / 2 / √n_trades
+ *      We take the median across nearby candles for robustness.
+ *
+ * slippageBps (takers only) — direct implementation shortfall:
+ *   slippageBps = max(halfSpreadBps, (fillPx − midPx) × sign / midPx × 10 000)
+ *   A taker always pays at least the half-spread to cross the book, so flooring
+ *   at halfSpreadBps corrects for candle-mid coarseness (candle mid is an
+ *   approximation of the true mid-quote at fill time).
+ *
+ * additionalImpactBps = max(0, slippageBps − halfSpreadBps)
+ */
+function estimateCandleSlippage(
+  cMap: Map<number, HLCandle>,
+  tradeTime: number,
+  fillPx: number,
+  midPx: number,
+  side: 'buy' | 'sell',
+  isTaker: boolean,
+): {
+  halfSpreadBps: number | null
+  slippageBps: number | null
+  additionalImpactBps: number | null
+} {
+  if (midPx <= 0) return { halfSpreadBps: null, slippageBps: null, additionalImpactBps: null }
+
+  const snapped = snapToMinute(tradeTime)
+
+  // Collect up to 16 candles: 15 pre-trade + the trade candle itself
+  const candles: HLCandle[] = []
+  for (let i = -15; i <= 0; i++) {
+    const c = cMap.get(snapped + i * 60_000)
+    if (c) candles.push(c)
+  }
+
+  // ── Stage 1: Roll (1984) autocovariance estimator ──────────────────────────
+  let rollHalfSpreadBps: number | null = null
+  if (candles.length >= 5) {
+    const closes = candles.map((c) => parseFloat(c.c))
+    const diffs = closes.slice(1).map((c, i) => c - closes[i])
+    const n = diffs.length - 1
+    if (n >= 3) {
+      const covSum = diffs.slice(0, n).reduce((s, d, i) => s + d * diffs[i + 1], 0)
+      const cov = covSum / n
+      if (cov < 0) {
+        rollHalfSpreadBps = (Math.sqrt(-cov) / midPx) * 10_000
+      }
+    }
+  }
+
+  // ── Stage 2: Amihud-Roll range estimator (fallback) ───────────────────────
+  let rangeHalfSpreadBps: number | null = null
+  if (candles.length >= 3) {
+    const perCandle: number[] = []
+    for (const c of candles) {
+      const hi = parseFloat(c.h)
+      const lo = parseFloat(c.l)
+      const mid = (hi + lo) / 2
+      const nTrades = Math.max(1, c.n)
+      if (mid > 0) {
+        perCandle.push(((hi - lo) / 2 / mid / Math.sqrt(nTrades)) * 10_000)
+      }
+    }
+    if (perCandle.length > 0) {
+      perCandle.sort((a, b) => a - b)
+      rangeHalfSpreadBps = perCandle[Math.floor(perCandle.length / 2)]
+    }
+  }
+
+  const halfSpreadBps = rollHalfSpreadBps ?? rangeHalfSpreadBps
+
+  // ── Directional slippage (takers only) ────────────────────────────────────
+  let slippageBps: number | null = null
+  if (isTaker) {
+    const sign = side === 'buy' ? 1 : -1
+    const raw = (sign * (fillPx - midPx)) / midPx * 10_000
+    // Floor at halfSpreadBps: a taker always pays at least the half-spread.
+    // This corrects for cases where the candle mid overshoots the true fill-time mid.
+    slippageBps = halfSpreadBps !== null ? Math.max(halfSpreadBps, raw) : Math.max(0, raw)
+  }
+
+  // ── Additional market impact ───────────────────────────────────────────────
+  let additionalImpactBps: number | null = null
+  if (slippageBps !== null && halfSpreadBps !== null) {
+    additionalImpactBps = Math.max(0, slippageBps - halfSpreadBps)
+  }
+
+  return { halfSpreadBps, slippageBps, additionalImpactBps }
+}
+
 // ─── Single-trade metrics ─────────────────────────────────────────────────────
 
 function computeTradeMetrics(
@@ -462,6 +570,18 @@ function computeTradeMetrics(
         }
       }
       // Makers: slippageBps stays null — they earn the spread, not pay it
+    }
+  }
+
+  // ── Candle-based fallback (pre-Dec 2025 or any gap in Hydromancer coverage) ─
+  // Applied to all non-spot fills when Hydromancer returned no matching data point.
+  if (slippageSource !== 'hydromancer' && !isSpot && midAtTrade !== null && cMap) {
+    const est = estimateCandleSlippage(cMap, fill.time, fillPx, midAtTrade, side, isTaker)
+    if (est.halfSpreadBps !== null || est.slippageBps !== null) {
+      halfSpreadBps = est.halfSpreadBps
+      slippageBps = est.slippageBps
+      additionalImpactBps = est.additionalImpactBps
+      slippageSource = 'candle'
     }
   }
 

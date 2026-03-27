@@ -30,6 +30,8 @@ export function TradeDetail({ trade: t, builderFeeEntry, onClose }: TradeDetailP
   const sourceLabel =
     t.slippageSource === 'hydromancer'
       ? 'Historical market data (Hydromancer)'
+      : t.slippageSource === 'candle'
+      ? 'Estimated · Roll (1984) + candle OHLCV'
       : 'Unavailable'
 
   return (

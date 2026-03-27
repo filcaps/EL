@@ -167,7 +167,7 @@ export interface TradeExecutionMetrics {
    */
   totalCostBps: number | null
 
-  slippageSource: 'hydromancer' | 'unavailable'
+  slippageSource: 'hydromancer' | 'candle' | 'unavailable'
 }
 
 export interface AssetSummary {
