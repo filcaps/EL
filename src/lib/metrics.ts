@@ -248,14 +248,15 @@ export async function analyseWallet(
    * Returns true when a fill is from a spot market.
    * Three sources of truth (checked in order):
    *  1. @N or "/" coin format → unambiguously spot
-   *  2. Coin is in spotCoinNames but NOT in HIP3_TOKENS → spot-only token
-   *     (UBTC, MON, USDH…); classified as spot regardless of dir because
-   *     HL's dir can be inconsistent for named-format spot fills
+   *  2. Coin is in spotCoinNames, NOT in HIP3_TOKENS, and NOT in metaMap (perp market) →
+   *     spot-only token (UBTC, USDH…); classified as spot regardless of dir.
+   *     Note: dual-market tokens (MON, HYPE — both spot and perp) are NOT caught here;
+   *     they fall through to dir-based classification below.
    *  3. dir is "buy", "sell", or starts with "spot " → spot
    */
   const isSpotCoin = (coin: string, dir?: string): boolean => {
     if (coin.startsWith('@') || coin.includes('/')) return true
-    if (spotCoinNames.has(coin) && !HIP3_TOKENS.has(coin)) return true
+    if (spotCoinNames.has(coin) && !HIP3_TOKENS.has(coin) && !metaMap.has(coin)) return true
     return isSpotDir(dir)
   }
 
@@ -267,7 +268,7 @@ export async function analyseWallet(
   const isHip3Coin = (coin: string, dir?: string): boolean => {
     if (isSpotDir(dir)) return false
     if (coin.startsWith('@') || coin.includes('/')) return false
-    if (spotCoinNames.has(coin) && !HIP3_TOKENS.has(coin)) return false
+    if (spotCoinNames.has(coin) && !HIP3_TOKENS.has(coin) && !metaMap.has(coin)) return false
     return HIP3_TOKENS.has(coin)
   }
 
