@@ -45,8 +45,13 @@ import {
 
 // ─── Candle helpers ───────────────────────────────────────────────────────────
 
+/**
+ * Typical price (O+H+L+C)/4 — a better mid proxy than (H+L)/2.
+ * Weights the open and close alongside the extremes, reducing the influence
+ * of transient high/low ticks that may be far from the fill time.
+ */
 function candleMid(c: HLCandle): number {
-  return (parseFloat(c.h) + parseFloat(c.l)) / 2
+  return (parseFloat(c.o) + parseFloat(c.h) + parseFloat(c.l) + parseFloat(c.c)) / 4
 }
 
 function buildCandleMap(candles: HLCandle[]): Map<number, HLCandle> {
@@ -391,29 +396,40 @@ function findNearestCandle(
  * Estimates halfSpreadBps, slippageBps, and additionalImpactBps from 1-min OHLCV
  * candle data when Hydromancer data is unavailable.
  *
- * ── Methods ──────────────────────────────────────────────────────────────────
+ * ── Spread estimators (three independent methods, median-combined) ─────────
  *
- * halfSpreadBps — two-stage estimate:
- *   1. Roll (1984) autocovariance estimator.
- *      Uses the first-order autocovariance of consecutive candle close changes:
- *        halfSpread = √(−Cov(Δclose_t, Δclose_{t+1}))   [when Cov < 0]
- *      A negative autocovariance in price changes is the signature of bid-ask
- *      bounce: buys push the price up, sells push it down, creating mean-reversion.
+ * 1. Corwin-Schultz (2012)  [primary — OHLCV-native]
+ *    Uses overlapping single- and two-period high-low ranges to separate spread
+ *    from volatility drift. For adjacent candles (t, t+1):
+ *      β = (ln H_t/L_t)² + (ln H_{t+1}/L_{t+1})²
+ *      γ = (ln max(H_t,H_{t+1}) / min(L_t,L_{t+1}))²
+ *      α = (1+√2)(√β − √γ)          [derived simplification of CS eq. 14]
+ *      S = 2(eᵅ−1)/(1+eᵅ)           [full spread as fraction of price]
+ *    Discards negative α (trending regime). Median across all valid pairs.
  *
- *   2. Amihud-Roll range estimator (fallback when Roll gives Cov ≥ 0).
- *      In a market with n_trades per candle, the 1-min high-low range contains
- *      both price drift AND spread bounce. The spread's contribution to the range
- *      scales as halfSpread × √n_trades (Madhavan 2000), so:
- *        halfSpread_raw ≈ (H − L) / 2 / √n_trades
- *      We take the median across nearby candles for robustness.
+ * 2. Roll (1984)  [secondary — close-price autocovariance]
+ *    halfSpread = √(−Cov(Δclose_t, Δclose_{t+1}))   [when Cov < 0]
+ *    Detects bid-ask bounce as negative serial correlation of price changes.
+ *    Tends to fail on liquid markets at 1-min resolution (bounce is diluted).
  *
- * slippageBps (takers only) — direct implementation shortfall:
- *   slippageBps = max(halfSpreadBps, (fillPx − midPx) × sign / midPx × 10 000)
- *   A taker always pays at least the half-spread to cross the book, so flooring
- *   at halfSpreadBps corrects for candle-mid coarseness (candle mid is an
- *   approximation of the true mid-quote at fill time).
+ * 3. Range / √n_trades  [tertiary — volume-adjusted range]
+ *    In a market with n trades/candle, the 1-min range's spread contribution
+ *    scales as halfSpread × √n_trades (Madhavan 2000):
+ *      halfSpread ≈ (H−L)/2 / mid / √n_trades
+ *    Median across candles for robustness.
  *
- * additionalImpactBps = max(0, slippageBps − halfSpreadBps)
+ *    Final halfSpreadBps = median of all positive estimates across the three methods.
+ *
+ * ── Slippage (takers) ───────────────────────────────────────────────────────
+ *    Direct implementation shortfall from the typical-price mid:
+ *      slippageBps = max(halfSpreadBps, (fillPx − midPx) × sign / midPx × 10 000)
+ *    Floored at halfSpreadBps because a taker always crosses at minimum the spread.
+ *
+ * ── Market impact (Almgren-Chriss √-law) ───────────────────────────────────
+ *    additionalImpactBps = halfSpreadBps × √(notionalUsd / avgMinuteVolumeUsd)
+ *    Captures the size-proportional book-walk: zero for infinitesimal orders,
+ *    one half-spread worth of extra impact when the order equals a full minute
+ *    of market volume.  slippageBps is then max(independent_IS, halfSpread + impact).
  */
 function estimateCandleSlippage(
   cMap: Map<number, HLCandle>,
@@ -422,6 +438,7 @@ function estimateCandleSlippage(
   midPx: number,
   side: 'buy' | 'sell',
   isTaker: boolean,
+  notionalUsd: number,
 ): {
   halfSpreadBps: number | null
   slippageBps: number | null
@@ -437,57 +454,94 @@ function estimateCandleSlippage(
     const c = cMap.get(snapped + i * 60_000)
     if (c) candles.push(c)
   }
+  if (candles.length === 0) return { halfSpreadBps: null, slippageBps: null, additionalImpactBps: null }
 
-  // ── Stage 1: Roll (1984) autocovariance estimator ──────────────────────────
-  let rollHalfSpreadBps: number | null = null
+  const allSpreadEstimates: number[] = []
+
+  // ── Estimator 1: Corwin-Schultz (2012) ─────────────────────────────────────
+  // α = (1+√2)(√β − √γ);  S = 2(eᵅ−1)/(1+eᵅ)
+  const SQ2P1 = 1 + Math.SQRT2  // ≈ 2.4142
+  for (let i = 0; i < candles.length - 1; i++) {
+    const c0 = candles[i], c1 = candles[i + 1]
+    const lnH0 = Math.log(parseFloat(c0.h)), lnL0 = Math.log(parseFloat(c0.l))
+    const lnH1 = Math.log(parseFloat(c1.h)), lnL1 = Math.log(parseFloat(c1.l))
+    const beta = (lnH0 - lnL0) ** 2 + (lnH1 - lnL1) ** 2
+    const gamma = (Math.max(lnH0, lnH1) - Math.min(lnL0, lnL1)) ** 2
+    const alpha = SQ2P1 * (Math.sqrt(beta) - Math.sqrt(gamma))
+    if (alpha <= 0) continue  // trending candle pair — discard
+    const S = 2 * (Math.exp(alpha) - 1) / (1 + Math.exp(alpha))
+    const halfBps = S / 2 * 10_000
+    if (halfBps > 0 && halfBps < 500) allSpreadEstimates.push(halfBps)  // sanity cap 500 bps
+  }
+
+  // ── Estimator 2: Roll (1984) ────────────────────────────────────────────────
   if (candles.length >= 5) {
     const closes = candles.map((c) => parseFloat(c.c))
     const diffs = closes.slice(1).map((c, i) => c - closes[i])
     const n = diffs.length - 1
     if (n >= 3) {
-      const covSum = diffs.slice(0, n).reduce((s, d, i) => s + d * diffs[i + 1], 0)
-      const cov = covSum / n
+      const cov = diffs.slice(0, n).reduce((s, d, i) => s + d * diffs[i + 1], 0) / n
       if (cov < 0) {
-        rollHalfSpreadBps = (Math.sqrt(-cov) / midPx) * 10_000
+        const halfBps = Math.sqrt(-cov) / midPx * 10_000
+        if (halfBps < 500) allSpreadEstimates.push(halfBps)
       }
     }
   }
 
-  // ── Stage 2: Amihud-Roll range estimator (fallback) ───────────────────────
-  let rangeHalfSpreadBps: number | null = null
-  if (candles.length >= 3) {
-    const perCandle: number[] = []
-    for (const c of candles) {
-      const hi = parseFloat(c.h)
-      const lo = parseFloat(c.l)
-      const mid = (hi + lo) / 2
-      const nTrades = Math.max(1, c.n)
-      if (mid > 0) {
-        perCandle.push(((hi - lo) / 2 / mid / Math.sqrt(nTrades)) * 10_000)
-      }
-    }
-    if (perCandle.length > 0) {
-      perCandle.sort((a, b) => a - b)
-      rangeHalfSpreadBps = perCandle[Math.floor(perCandle.length / 2)]
+  // ── Estimator 3: Volume-adjusted range (Range / √n_trades) ─────────────────
+  for (const c of candles) {
+    const hi = parseFloat(c.h), lo = parseFloat(c.l), mid = (hi + lo) / 2
+    const nTrades = Math.max(1, c.n)
+    if (mid > 0) {
+      const halfBps = (hi - lo) / 2 / mid / Math.sqrt(nTrades) * 10_000
+      if (halfBps > 0 && halfBps < 500) allSpreadEstimates.push(halfBps)
     }
   }
 
-  const halfSpreadBps = rollHalfSpreadBps ?? rangeHalfSpreadBps
+  // ── Combine: median of all valid estimates ─────────────────────────────────
+  let halfSpreadBps: number | null = null
+  if (allSpreadEstimates.length > 0) {
+    allSpreadEstimates.sort((a, b) => a - b)
+    halfSpreadBps = allSpreadEstimates[Math.floor(allSpreadEstimates.length / 2)]
+  }
 
-  // ── Directional slippage (takers only) ────────────────────────────────────
+  // ── Average minute-volume for impact model ─────────────────────────────────
+  let avgMinuteVolumeUsd = 0
+  if (candles.length > 0) {
+    const totalVol = candles.reduce((s, c) => {
+      const volBase = parseFloat(c.v)
+      const px = (parseFloat(c.h) + parseFloat(c.l)) / 2
+      return s + volBase * px
+    }, 0)
+    avgMinuteVolumeUsd = totalVol / candles.length
+  }
+
+  // ── Directional slippage (takers only) ─────────────────────────────────────
   let slippageBps: number | null = null
+  let additionalImpactBps: number | null = null
+
   if (isTaker) {
     const sign = side === 'buy' ? 1 : -1
-    const raw = (sign * (fillPx - midPx)) / midPx * 10_000
-    // Floor at halfSpreadBps: a taker always pays at least the half-spread.
-    // This corrects for cases where the candle mid overshoots the true fill-time mid.
-    slippageBps = halfSpreadBps !== null ? Math.max(halfSpreadBps, raw) : Math.max(0, raw)
-  }
+    const IS = sign * (fillPx - midPx) / midPx * 10_000  // raw implementation shortfall
 
-  // ── Additional market impact ───────────────────────────────────────────────
-  let additionalImpactBps: number | null = null
-  if (slippageBps !== null && halfSpreadBps !== null) {
-    additionalImpactBps = Math.max(0, slippageBps - halfSpreadBps)
+    // ── Almgren-Chriss √-impact model ────────────────────────────────────────
+    // impact = halfSpread × √(notional / avgMinuteVolume)
+    // Rationale: zero-size orders pay only halfSpread; as size → avgMinuteVolume,
+    // expected book-walk adds another halfSpread worth of impact.
+    let sqrtImpact = 0
+    if (halfSpreadBps !== null && avgMinuteVolumeUsd > 0) {
+      sqrtImpact = halfSpreadBps * Math.sqrt(notionalUsd / avgMinuteVolumeUsd)
+    }
+    const modelSlippage = halfSpreadBps !== null ? halfSpreadBps + sqrtImpact : 0
+
+    // Use the larger of: observed IS (direct) vs model prediction.
+    // The model provides a floor when the observed IS is noisy (e.g., candle-mid error).
+    const floor = halfSpreadBps ?? 0
+    slippageBps = Math.max(floor, IS, modelSlippage)
+
+    additionalImpactBps = halfSpreadBps !== null
+      ? Math.max(0, slippageBps - halfSpreadBps)
+      : null
   }
 
   return { halfSpreadBps, slippageBps, additionalImpactBps }
@@ -576,7 +630,7 @@ function computeTradeMetrics(
   // ── Candle-based fallback (pre-Dec 2025 or any gap in Hydromancer coverage) ─
   // Applied to all non-spot fills when Hydromancer returned no matching data point.
   if (slippageSource !== 'hydromancer' && !isSpot && midAtTrade !== null && cMap) {
-    const est = estimateCandleSlippage(cMap, fill.time, fillPx, midAtTrade, side, isTaker)
+    const est = estimateCandleSlippage(cMap, fill.time, fillPx, midAtTrade, side, isTaker, notional)
     if (est.halfSpreadBps !== null || est.slippageBps !== null) {
       halfSpreadBps = est.halfSpreadBps
       slippageBps = est.slippageBps
@@ -755,10 +809,12 @@ function aggregateWallet(
   const estimatedTotalCostUsd =
     avgTotal !== null ? (avgTotal / 10_000) * totalVolumeUsd : null
 
-  // Coverage: fraction of trades with market slippage data
+  // Coverage: fraction of non-spot trades that have any slippage estimate
+  // (Hydromancer = observed order-book data; candle = model estimate)
+  const nonSpotTrades = trades.filter((t) => !t.isSpot)
   const slippageDataCoverage =
-    trades.length > 0
-      ? trades.filter((t) => t.slippageSource === 'hydromancer').length / trades.length
+    nonSpotTrades.length > 0
+      ? nonSpotTrades.filter((t) => t.slippageSource === 'hydromancer' || t.slippageSource === 'candle').length / nonSpotTrades.length
       : 0
 
   return {
