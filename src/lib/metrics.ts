@@ -31,6 +31,7 @@ import {
   buildSlippageCache,
   closestTier,
   nearestSlippagePoint,
+  HIP3_HYDROMANCER_KEYS,
   type SlippageCache,
   type NotionalTier,
 } from './hydromancer'
@@ -280,8 +281,11 @@ export async function analyseWallet(
   // 3 ── Group fills by coin; compute per-fill notional tiers ────────────────
   const coinGroups = groupByCoin(recentFills)
 
-  // Per-fill tier: each fill uses its own notional for tier resolution (fix #1)
-  const fillTiers = new Map<number, NotionalTier>() // keyed by tid
+  // Per-fill tier: used for Almgren-Chriss model and Hydromancer lookup
+  const fillTiers = new Map<number, NotionalTier>()   // tid → tier
+  // Per-fill Hydromancer cache key: `${hmCoin}:${tier}`, or absent when
+  // the coin has no Hydromancer coverage (HIP-3 with no xyz/cash entry).
+  const fillHmKeys = new Map<number, string>()        // tid → hmCacheKey
   const slippagePairs: Array<{ coin: string; tier: NotionalTier }> = []
   const seenPairs = new Set<string>()
 
@@ -290,10 +294,23 @@ export async function analyseWallet(
     const notional = parseFloat(fill.px) * parseFloat(fill.sz)
     const tier = closestTier(notional)
     fillTiers.set(fill.tid, tier)
-    const pairKey = `${fill.coin}:${tier}`
-    if (!seenPairs.has(pairKey)) {
-      seenPairs.add(pairKey)
-      slippagePairs.push({ coin: fill.coin, tier })
+
+    // Map HL coin → Hydromancer coin name:
+    //   standard perp (BTC, ETH, HYPE…) → same name ("BTC")
+    //   HIP-3 with Hydromancer coverage  → "xyz:TSLA", "cash:WTI", etc.
+    //   HIP-3 without Hydromancer data   → null (candle fallback only)
+    const hip3 = isHip3Coin(fill.coin, fill.dir)
+    const hmCoin = hip3
+      ? (HIP3_HYDROMANCER_KEYS[fill.coin] ?? null)
+      : fill.coin
+
+    if (hmCoin) {
+      const hmKey = `${hmCoin}:${tier}`
+      fillHmKeys.set(fill.tid, hmKey)
+      if (!seenPairs.has(hmKey)) {
+        seenPairs.add(hmKey)
+        slippagePairs.push({ coin: hmCoin, tier })
+      }
     }
   }
 
@@ -311,13 +328,19 @@ export async function analyseWallet(
       Array.from(coinGroups.entries())
         .map(async ([coin, coinFills]) => {
           const times = coinFills.map((f) => f.time)
-          const minT = arrayMin(times)
           const maxT = arrayMax(times)
+          // Cap candle window to 90 days before the latest fill.
+          // Without a cap a 2-year fill history would require 200+ sequential
+          // chunk requests per coin, causing timeouts and silent failures.
+          // 90 days covers Hydromancer's full coverage window (Dec 2025+) plus
+          // provides candle context for the spread estimators.
+          const MAX_CANDLE_WINDOW_MS = 90 * 24 * 60 * 60 * 1000 // 90 days
+          const minT = Math.max(arrayMin(times), maxT - MAX_CANDLE_WINDOW_MS)
           // Resolve the correct ticker for the candle API
           const candleTicker = spotCandleTickers.get(coin) ?? coin
           try {
             progress('Loading candles…', coin)
-            // Buffer: 10 min before earliest fill, 30 min after latest
+            // Buffer: 10 min before window start, 30 min after latest fill
             const candles = await getCandlesFull(candleTicker, minT - 600_000, maxT + 1_800_000)
             // Store under original fill coin key so computeTradeMetrics can look it up
             candleMaps.set(coin, buildCandleMap(candles))
@@ -344,7 +367,7 @@ export async function analyseWallet(
   // 6 ── Compute per-trade metrics ────────────────────────────────────────────
   progress('Computing execution metrics…')
   const tradeMetrics: TradeExecutionMetrics[] = recentFills.map((fill) =>
-    computeTradeMetrics(fill, fillTiers, candleMaps, slippageCache, spotCoinNames, isSpotCoin, isHip3Coin, fill.dir),
+    computeTradeMetrics(fill, fillTiers, fillHmKeys, candleMaps, slippageCache, spotCoinNames, isSpotCoin, isHip3Coin, fill.dir),
   )
 
   // 8 ── Cancel / trade ratio (windowed to fills time range) (fix #6) ────────
@@ -552,6 +575,7 @@ function estimateCandleSlippage(
 function computeTradeMetrics(
   fill: HLFill,
   fillTiers: Map<number, NotionalTier>,
+  fillHmKeys: Map<number, string>,
   candleMaps: Map<string, Map<number, HLCandle>>,
   slippageCache: SlippageCache,
   spotCoinNames: Map<string, string>,
@@ -596,9 +620,11 @@ function computeTradeMetrics(
   let slippageSource: TradeExecutionMetrics['slippageSource'] = 'unavailable'
 
   const tier = fillTiers.get(fill.tid)
-  if (tier && !isSpot) {
-    const key = `${fill.coin}:${tier}`
-    const pts = slippageCache[key] ?? []
+  // fillHmKeys stores the correct Hydromancer cache key (e.g. "xyz:TSLA:1000")
+  // which differs from the raw HL coin name for HIP-3 markets.
+  const hmKey = fillHmKeys.get(fill.tid)
+  if (tier && hmKey && !isSpot) {
+    const pts = slippageCache[hmKey] ?? []
     const nearest = nearestSlippagePoint(pts, fill.time)
 
     if (nearest) {

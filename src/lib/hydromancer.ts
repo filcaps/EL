@@ -8,6 +8,58 @@ const BASE = '/api/hydromancer'
 export const NOTIONAL_TIERS = [1_000, 5_000, 10_000, 30_000, 50_000, 100_000, 250_000, 500_000, 1_000_000] as const
 export type NotionalTier = (typeof NOTIONAL_TIERS)[number]
 
+// ─── HIP-3 coin → Hydromancer coin key mapping ───────────────────────────────
+//
+// Hydromancer tracks HIP-3 RWA markets under a dex-prefixed coin name:
+//   standard perps:  "BTC", "ETH", "HYPE"  (no prefix — dex="hyperliquid")
+//   HIP-3 xyz DEX:   "xyz:TSLA", "xyz:NVDA" (dex="xyz")
+//   HIP-3 cash DEX:  "cash:WTI"             (dex="cash", only where xyz has no data)
+//
+// Coins absent from this map have no Hydromancer coverage; they fall back to
+// the candle-based estimation model in metrics.ts.
+//
+// Tested 2026-03-27 against startTime=1769817600000 (2026-02-01).
+export const HIP3_HYDROMANCER_KEYS: Record<string, string> = {
+  // ── Stocks (xyz) ────────────────────────────────────────────────────────
+  AAPL:    'xyz:AAPL',
+  AMD:     'xyz:AMD',
+  AMZN:    'xyz:AMZN',
+  BABA:    'xyz:BABA',
+  COIN:    'xyz:COIN',
+  CRWV:    'xyz:CRWV',
+  GOOGL:   'xyz:GOOGL',
+  HOOD:    'xyz:HOOD',
+  HYUNDAI: 'xyz:HYUNDAI',
+  INTC:    'xyz:INTC',
+  META:    'xyz:META',
+  MSFT:    'xyz:MSFT',
+  MU:      'xyz:MU',
+  NFLX:    'xyz:NFLX',
+  NVDA:    'xyz:NVDA',
+  ORCL:    'xyz:ORCL',
+  PLTR:    'xyz:PLTR',
+  RIVN:    'xyz:RIVN',
+  SNDK:    'xyz:SNDK',
+  TSLA:    'xyz:TSLA',
+  // ── Commodities ──────────────────────────────────────────────────────────
+  GOLD:      'xyz:GOLD',
+  SILVER:    'xyz:SILVER',
+  COPPER:    'xyz:COPPER',
+  NATGAS:    'xyz:NATGAS',
+  PALLADIUM: 'xyz:PALLADIUM',
+  PLATINUM:  'xyz:PLATINUM',
+  WTI:       'cash:WTI',   // only available on cash DEX
+  // ── Forex ────────────────────────────────────────────────────────────────
+  JPY: 'xyz:JPY',
+  // ── ETFs ─────────────────────────────────────────────────────────────────
+  URNM: 'xyz:URNM',
+  EWJ:  'xyz:EWJ',
+  // Coins with no Hydromancer coverage fall through to candle model:
+  //   CLX, RTX, TSMS, OIL, 100BRENT, USOIL, US500, USTECH, SMALL2000,
+  //   USENERGY, EURUSD, GLD, SEMI, USBOND, EWYM, MINE, N, BMNR, CRC,
+  //   KHX, LM, SMS, STR, UEWY, USAR, YZ
+}
+
 async function post<T>(body: Record<string, unknown>): Promise<T> {
   const res = await fetch(BASE, {
     method: 'POST',
