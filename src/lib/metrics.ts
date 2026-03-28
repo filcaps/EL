@@ -47,6 +47,31 @@ import {
 // ─── Candle helpers ───────────────────────────────────────────────────────────
 
 /**
+ * HL candleSnapshot stores the most recent ~5000 candles per interval,
+ * measured backwards from NOW (regardless of startTime requested).
+ * Coverage as of 2026-03:
+ *   1m  →   ~3.5 days
+ *   1h  → ~208   days  (7 months)   ← covers Nov 2025 fills
+ *   4h  → ~833   days  (28 months)  ← covers pre-2025 fills
+ *
+ * Returns the coarsest interval whose coverage window still contains
+ * the oldest fill (`ageMs` = now − oldest fill time).
+ */
+const CANDLE_TIERS: Array<{ interval: string; intervalMs: number; coverageDays: number }> = [
+  { interval: '1m', intervalMs:    60_000, coverageDays:   3.5 },
+  { interval: '1h', intervalMs: 3_600_000, coverageDays: 210   },
+  { interval: '4h', intervalMs:14_400_000, coverageDays: 840   },
+]
+
+function chooseCandleTier(ageMs: number) {
+  const ageDays = ageMs / 86_400_000
+  for (const tier of CANDLE_TIERS) {
+    if (ageDays <= tier.coverageDays) return tier
+  }
+  return CANDLE_TIERS[CANDLE_TIERS.length - 1]
+}
+
+/**
  * Typical price (O+H+L+C)/4 — a better mid proxy than (H+L)/2.
  * Weights the open and close alongside the extremes, reducing the influence
  * of transient high/low ticks that may be far from the fill time.
@@ -61,8 +86,9 @@ function buildCandleMap(candles: HLCandle[]): Map<number, HLCandle> {
   return m
 }
 
-function snapToMinute(ms: number): number {
-  return Math.floor(ms / 60_000) * 60_000
+/** Snap a timestamp to the start of the candle interval it falls in. */
+function snapToInterval(ms: number, intervalMs: number): number {
+  return Math.floor(ms / intervalMs) * intervalMs
 }
 
 // ─── Per-trade metric calculations ───────────────────────────────────────────
@@ -318,32 +344,41 @@ export async function analyseWallet(
   progress('Loading market data (candles · slippage)…')
 
   const candleMaps = new Map<string, Map<number, HLCandle>>()
+  // intervalMs stored alongside each coin's candle map so the lookup and
+  // estimator can use the correct step size (60_000 for 1m, 3_600_000 for 1h…)
+  const candleIntervalMs = new Map<string, number>()
   let slippageCache: SlippageCache = {}
+  const nowMs = Date.now()
 
   await Promise.all([
-    // 4: 1-min candles for every coin.
-    //    Canonical spot (PURR/USDC = @0) needs base ticker ("PURR") for the candle API.
-    //    Non-canonical spot (@N) and perps use the coin string directly.
+    // 4: Candles for every coin — interval chosen so HL's ~5000-candle window
+    //    covers the oldest fill for that coin.
+    //
+    //    HL candleSnapshot returns the most recent ~5000 candles from NOW,
+    //    regardless of the startTime requested:
+    //      1m  → ~3.5 days   (fills < 3.5 days old)
+    //      1h  → ~208 days   (fills up to 7 months old, e.g. Nov 2025)
+    //      4h  → ~833 days   (fills up to 2+ years old)
+    //
+    //    We always request endTime=now so HL populates the rolling window.
     Promise.allSettled(
       Array.from(coinGroups.entries())
         .map(async ([coin, coinFills]) => {
           const times = coinFills.map((f) => f.time)
-          const maxT = arrayMax(times)
-          // Cap candle window to 90 days before the latest fill.
-          // Without a cap a 2-year fill history would require 200+ sequential
-          // chunk requests per coin, causing timeouts and silent failures.
-          // 90 days covers Hydromancer's full coverage window (Dec 2025+) plus
-          // provides candle context for the spread estimators.
-          const MAX_CANDLE_WINDOW_MS = 90 * 24 * 60 * 60 * 1000 // 90 days
-          const minT = Math.max(arrayMin(times), maxT - MAX_CANDLE_WINDOW_MS)
+          const minT = arrayMin(times)
+          const ageMs = nowMs - minT
+          const { interval, intervalMs } = chooseCandleTier(ageMs)
           // Resolve the correct ticker for the candle API
           const candleTicker = spotCandleTickers.get(coin) ?? coin
           try {
             progress('Loading candles…', coin)
-            // Buffer: 10 min before window start, 30 min after latest fill
-            const candles = await getCandlesFull(candleTicker, minT - 600_000, maxT + 1_800_000)
-            // Store under original fill coin key so computeTradeMetrics can look it up
-            candleMaps.set(coin, buildCandleMap(candles))
+            // startTime: well before the oldest fill so the window definitely
+            //   includes it. endTime: nowMs so HL returns its rolling window.
+            const candles = await getCandlesFull(candleTicker, minT - intervalMs * 2, nowMs, interval)
+            if (candles.length > 0) {
+              candleMaps.set(coin, buildCandleMap(candles))
+              candleIntervalMs.set(coin, intervalMs)
+            }
           } catch {
             // non-fatal: price-based metrics will be null for this coin
           }
@@ -367,7 +402,7 @@ export async function analyseWallet(
   // 6 ── Compute per-trade metrics ────────────────────────────────────────────
   progress('Computing execution metrics…')
   const tradeMetrics: TradeExecutionMetrics[] = recentFills.map((fill) =>
-    computeTradeMetrics(fill, fillTiers, fillHmKeys, candleMaps, slippageCache, spotCoinNames, isSpotCoin, isHip3Coin, fill.dir),
+    computeTradeMetrics(fill, fillTiers, fillHmKeys, candleMaps, candleIntervalMs, slippageCache, spotCoinNames, isSpotCoin, isHip3Coin, fill.dir),
   )
 
   // 8 ── Cancel / trade ratio (windowed to fills time range) (fix #6) ────────
@@ -394,19 +429,21 @@ export async function analyseWallet(
 // ─── Candle lookup helpers ────────────────────────────────────────────────────
 
 /**
- * Find the nearest 1-min candle to `snappedMs` within ±`maxMinutes` minutes.
- * Scans outward from the target in 1-min steps, checking both directions.
+ * Find the nearest candle to `ms` within ±`maxSteps` candle-intervals.
+ * Works for any interval (1m, 1h, 4h…).
  */
 function findNearestCandle(
   cMap: Map<number, HLCandle>,
-  snappedMs: number,
-  maxMinutes: number,
+  ms: number,
+  intervalMs: number,
+  maxSteps = 10,
 ): HLCandle | null {
-  for (let step = 0; step <= maxMinutes; step++) {
-    const earlier = cMap.get(snappedMs - step * 60_000)
+  const snapped = snapToInterval(ms, intervalMs)
+  for (let step = 0; step <= maxSteps; step++) {
+    const earlier = cMap.get(snapped - step * intervalMs)
     if (earlier) return earlier
     if (step > 0) {
-      const later = cMap.get(snappedMs + step * 60_000)
+      const later = cMap.get(snapped + step * intervalMs)
       if (later) return later
     }
   }
@@ -462,6 +499,7 @@ function estimateCandleSlippage(
   side: 'buy' | 'sell',
   isTaker: boolean,
   notionalUsd: number,
+  intervalMs = 60_000,
 ): {
   halfSpreadBps: number | null
   slippageBps: number | null
@@ -469,12 +507,12 @@ function estimateCandleSlippage(
 } {
   if (midPx <= 0) return { halfSpreadBps: null, slippageBps: null, additionalImpactBps: null }
 
-  const snapped = snapToMinute(tradeTime)
+  const snapped = snapToInterval(tradeTime, intervalMs)
 
   // Collect up to 16 candles: 15 pre-trade + the trade candle itself
   const candles: HLCandle[] = []
   for (let i = -15; i <= 0; i++) {
-    const c = cMap.get(snapped + i * 60_000)
+    const c = cMap.get(snapped + i * intervalMs)
     if (c) candles.push(c)
   }
   if (candles.length === 0) return { halfSpreadBps: null, slippageBps: null, additionalImpactBps: null }
@@ -577,6 +615,7 @@ function computeTradeMetrics(
   fillTiers: Map<number, NotionalTier>,
   fillHmKeys: Map<number, string>,
   candleMaps: Map<string, Map<number, HLCandle>>,
+  candleIntervalMs: Map<string, number>,
   slippageCache: SlippageCache,
   spotCoinNames: Map<string, string>,
   isSpotCoin: (coin: string, dir?: string) => boolean,
@@ -599,15 +638,16 @@ function computeTradeMetrics(
   let candleOpen: number | null = null
 
   const cMap = candleMaps.get(fill.coin)
+  const iMs = candleIntervalMs.get(fill.coin) ?? 60_000  // default 1m
   if (cMap) {
-    const snapped = snapToMinute(fill.time)
-    const candleAtTrade = findNearestCandle(cMap, snapped, 10)
+    const candleAtTrade = findNearestCandle(cMap, fill.time, iMs, 10)
     if (candleAtTrade) {
       midAtTrade = candleMid(candleAtTrade)
       candleOpen = parseFloat(candleAtTrade.o)
     }
-    const snapped5 = snapToMinute(fill.time + 5 * 60_000)
-    const candle5 = findNearestCandle(cMap, snapped5, 10)
+    // "5 min later" generalised to "5 intervals later" for coarse candles
+    const fiveIntervalsMs = Math.max(5 * 60_000, 5 * iMs)
+    const candle5 = findNearestCandle(cMap, fill.time + fiveIntervalsMs, iMs, 10)
     if (candle5) midPlus5 = candleMid(candle5)
   }
 
@@ -656,7 +696,7 @@ function computeTradeMetrics(
   // ── Candle-based fallback (pre-Dec 2025 or any gap in Hydromancer coverage) ─
   // Applied to all non-spot fills when Hydromancer returned no matching data point.
   if (slippageSource !== 'hydromancer' && !isSpot && midAtTrade !== null && cMap) {
-    const est = estimateCandleSlippage(cMap, fill.time, fillPx, midAtTrade, side, isTaker, notional)
+    const est = estimateCandleSlippage(cMap, fill.time, fillPx, midAtTrade, side, isTaker, notional, iMs)
     if (est.halfSpreadBps !== null || est.slippageBps !== null) {
       halfSpreadBps = est.halfSpreadBps
       slippageBps = est.slippageBps
