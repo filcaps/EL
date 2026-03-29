@@ -259,11 +259,42 @@ export async function analyseWallet(
       } else {
         const displayName = tokenNames.get((market.tokens as number[])[0]) ?? fillKey
         spotCoinNames.set(fillKey, displayName)
-        spotCandleTickers.set(fillKey, fillKey)
 
+        // Pick the best candle ticker for this spot token.
+        // Priority (mirrors CoinIcon.tsx fallback chain for icons):
+        //   1. U-prefix bridged tokens (UBTC→BTC, UETH→ETH) — NOT USD-prefixed
+        //      stablecoins (USDH, USDHL).  Use the perp candle as a tight proxy.
+        //   2. 0/1-suffix bridged tokens (AAVE0→AAVE, BNB1→BNB).
+        //   3. Named community tokens (HPL, PURR, etc.) — try the display name
+        //      directly; HL candle API accepts spot token names.
+        //   4. Fallback: @N  (candle fetch may return [] but is non-fatal).
+        let candleTicker: string = fillKey
+        if (
+          displayName.startsWith('U') &&
+          displayName.length > 2 &&
+          !displayName.startsWith('USD')
+        ) {
+          // UBTC → BTC, UETH → ETH, USOL → SOL
+          const base = displayName.slice(1)
+          if (metaMap.has(base)) candleTicker = base
+          else candleTicker = displayName
+        } else if (
+          (displayName.endsWith('0') || displayName.endsWith('1')) &&
+          displayName.length > 2
+        ) {
+          // AAVE0 → AAVE, BNB1 → BNB
+          const base = displayName.slice(0, -1)
+          if (metaMap.has(base)) candleTicker = base
+          else candleTicker = displayName
+        } else if (displayName !== fillKey) {
+          // HPL, PURR, USDH, etc. — use display name directly
+          candleTicker = displayName
+        }
+
+        spotCandleTickers.set(fillKey, candleTicker)
         if (displayName !== fillKey) {
           spotCoinNames.set(displayName, displayName)
-          spotCandleTickers.set(displayName, fillKey) // candle API needs @N
+          spotCandleTickers.set(displayName, candleTicker)
         }
       }
     }
@@ -693,9 +724,15 @@ function computeTradeMetrics(
     }
   }
 
-  // ── Candle-based fallback (pre-Dec 2025 or any gap in Hydromancer coverage) ─
-  // Applied to all non-spot fills when Hydromancer returned no matching data point.
-  if (slippageSource !== 'hydromancer' && !isSpot && midAtTrade !== null && cMap) {
+  // ── Candle-based estimation ───────────────────────────────────────────────
+  // Applies to BOTH perp and spot fills:
+  //   • Perps: fires when Hydromancer has no data point (pre-Dec 2025 fills,
+  //     coins not covered by Hydromancer, or gaps in the 15-min sampling).
+  //   • Spot: always fires (no Hydromancer coverage for spot markets).
+  // Uses CS(2012) + Roll(1984) + Range/√n spread estimators and the
+  // Almgren-Chriss √-impact model.  Mid-price is the OHLC typical price
+  // of the nearest candle (1m / 1h / 4h depending on fill age).
+  if (slippageSource !== 'hydromancer' && midAtTrade !== null && cMap) {
     const est = estimateCandleSlippage(cMap, fill.time, fillPx, midAtTrade, side, isTaker, notional, iMs)
     if (est.halfSpreadBps !== null || est.slippageBps !== null) {
       halfSpreadBps = est.halfSpreadBps
@@ -875,12 +912,12 @@ function aggregateWallet(
   const estimatedTotalCostUsd =
     avgTotal !== null ? (avgTotal / 10_000) * totalVolumeUsd : null
 
-  // Coverage: fraction of non-spot trades that have any slippage estimate
-  // (Hydromancer = observed order-book data; candle = model estimate)
-  const nonSpotTrades = trades.filter((t) => !t.isSpot)
+  // Coverage: fraction of all trades that have any slippage/spread estimate.
+  // Hydromancer = observed order-book data (perps only, Dec 2025+).
+  // Candle     = model estimate from OHLCV (all assets, any age within candle history).
   const slippageDataCoverage =
-    nonSpotTrades.length > 0
-      ? nonSpotTrades.filter((t) => t.slippageSource === 'hydromancer' || t.slippageSource === 'candle').length / nonSpotTrades.length
+    trades.length > 0
+      ? trades.filter((t) => t.slippageSource === 'hydromancer' || t.slippageSource === 'candle').length / trades.length
       : 0
 
   return {
