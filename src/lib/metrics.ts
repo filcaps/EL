@@ -49,16 +49,19 @@ import {
 /**
  * HL candleSnapshot stores the most recent ~5000 candles per interval,
  * measured backwards from NOW (regardless of startTime requested).
- * Coverage as of 2026-03:
- *   1m  →   ~3.5 days
- *   1h  → ~208   days  (7 months)   ← covers Nov 2025 fills
- *   4h  → ~833   days  (28 months)  ← covers pre-2025 fills
+ * Applies to BOTH named perp tickers ("BTC", "HYPE") and @N spot tickers.
+ * Coverage as of 2026-03 (empirically verified):
+ *   1m  →   ~4 days
+ *   1h  → ~208 days  (7 months)   ← covers Nov 2025 perp fills
+ *                                    and spot tokens as old as Sep 2025
+ *   4h  → ~840 days  (28 months)  ← covers pre-2025 fills for major tokens
+ *                                    (newer spot tokens limited by launch date)
  *
- * Returns the coarsest interval whose coverage window still contains
+ * Returns the finest interval whose coverage window still contains
  * the oldest fill (`ageMs` = now − oldest fill time).
  */
 const CANDLE_TIERS: Array<{ interval: string; intervalMs: number; coverageDays: number }> = [
-  { interval: '1m', intervalMs:    60_000, coverageDays:   3.5 },
+  { interval: '1m', intervalMs:    60_000, coverageDays:   4   },
   { interval: '1h', intervalMs: 3_600_000, coverageDays: 210   },
   { interval: '4h', intervalMs:14_400_000, coverageDays: 840   },
 ]
@@ -252,49 +255,25 @@ export async function analyseWallet(
       if (market.isCanonical) {
         const baseTicker = (market.name as string).split('/')[0]
         spotCoinNames.set(fillKey, baseTicker)
-        spotCandleTickers.set(fillKey, baseTicker)
+        // Use @N directly as the candle ticker.
+        // HL candleSnapshot supports @N format and provides the real spot-market
+        // OHLCV (distinct order book, own liquidity profile — not the perp).
+        // Depth: same ~5000-candle rolling window as named perp tickers.
+        spotCandleTickers.set(fillKey, fillKey)
         spotCoinNames.set(market.name as string, baseTicker)
-        spotCandleTickers.set(market.name as string, baseTicker)
+        spotCandleTickers.set(market.name as string, fillKey)
         canonicalSpotKeys.add(fillKey)
       } else {
         const displayName = tokenNames.get((market.tokens as number[])[0]) ?? fillKey
         spotCoinNames.set(fillKey, displayName)
-
-        // Pick the best candle ticker for this spot token.
-        // Priority (mirrors CoinIcon.tsx fallback chain for icons):
-        //   1. U-prefix bridged tokens (UBTC→BTC, UETH→ETH) — NOT USD-prefixed
-        //      stablecoins (USDH, USDHL).  Use the perp candle as a tight proxy.
-        //   2. 0/1-suffix bridged tokens (AAVE0→AAVE, BNB1→BNB).
-        //   3. Named community tokens (HPL, PURR, etc.) — try the display name
-        //      directly; HL candle API accepts spot token names.
-        //   4. Fallback: @N  (candle fetch may return [] but is non-fatal).
-        let candleTicker: string = fillKey
-        if (
-          displayName.startsWith('U') &&
-          displayName.length > 2 &&
-          !displayName.startsWith('USD')
-        ) {
-          // UBTC → BTC, UETH → ETH, USOL → SOL
-          const base = displayName.slice(1)
-          if (metaMap.has(base)) candleTicker = base
-          else candleTicker = displayName
-        } else if (
-          (displayName.endsWith('0') || displayName.endsWith('1')) &&
-          displayName.length > 2
-        ) {
-          // AAVE0 → AAVE, BNB1 → BNB
-          const base = displayName.slice(0, -1)
-          if (metaMap.has(base)) candleTicker = base
-          else candleTicker = displayName
-        } else if (displayName !== fillKey) {
-          // HPL, PURR, USDH, etc. — use display name directly
-          candleTicker = displayName
-        }
-
-        spotCandleTickers.set(fillKey, candleTicker)
+        // Same principle: use @N for actual spot candles.
+        // For bridged tokens (UBTC, AAVE0…), the spot book is typically
+        // thinner than the perp — using a perp proxy would understate
+        // spread/impact. @N data correctly captures the spot liquidity.
+        spotCandleTickers.set(fillKey, fillKey)
         if (displayName !== fillKey) {
           spotCoinNames.set(displayName, displayName)
-          spotCandleTickers.set(displayName, candleTicker)
+          spotCandleTickers.set(displayName, fillKey)
         }
       }
     }
