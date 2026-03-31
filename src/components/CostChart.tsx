@@ -81,6 +81,21 @@ export function CostChart({ trades, builderFeeMap }: CostChartProps) {
     )
   }
 
+  // Determine date range to choose tick format
+  const spanMs = data.length >= 2 ? data[data.length - 1].date - data[0].date : 0
+  const spanDays = spanMs / (1000 * 60 * 60 * 24)
+  const crossesYearBoundary =
+    data.length >= 2 &&
+    new Date(data[0].date).getFullYear() !== new Date(data[data.length - 1].date).getFullYear()
+
+  // For long periods (>60 days) use month+year; for shorter use month+day.
+  // Always include year when the data spans multiple calendar years.
+  function xTickFormatter(v: number): string {
+    if (spanDays > 60) return format(new Date(v), 'MMM yyyy')
+    if (crossesYearBoundary) return format(new Date(v), "MMM d ''yy")
+    return format(new Date(v), 'MMM d')
+  }
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
@@ -101,7 +116,7 @@ export function CostChart({ trades, builderFeeMap }: CostChartProps) {
         <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
         <XAxis
           dataKey="date"
-          tickFormatter={(v) => format(new Date(v), 'MMM d')}
+          tickFormatter={xTickFormatter}
           tick={{ fill: '#555', fontSize: 11 }}
           axisLine={false}
           tickLine={false}

@@ -944,6 +944,13 @@ function computeTradeMetrics(
 
   const fBps = feeBps(feeUsd, notional)
 
+  // Makers fill at their limit price: 0 slippage cost, 0 additional market impact.
+  // Show 0 rather than null so the UI displays "0.00 bps" instead of "—".
+  if (!isTaker) {
+    slippageBps = 0
+    additionalImpactBps = 0
+  }
+
   // Total cost (fix #2: no double-counting; fix #3: maker uses rebate not slippage)
   let totalCostBps: number | null = null
   if (isTaker) {

@@ -6,6 +6,7 @@ import { fetchOrderBuilderFee } from './lib/hyperliquid'
 import { Header } from './components/Header'
 import { SearchPage } from './components/SearchPage'
 import { WalletDashboard } from './components/WalletDashboard'
+import { DataPage } from './components/DataPage'
 import { LoadingState, ErrorBanner } from './components/LoadingState'
 
 type AppState =
@@ -13,6 +14,7 @@ type AppState =
   | { view: 'loading'; address: string; stage: string; detail?: string }
   | { view: 'error'; address: string; message: string }
   | { view: 'dashboard'; summary: WalletSummary }
+  | { view: 'data' }
 
 export interface BuilderFeeEntry {
   feeUsd: number
@@ -61,6 +63,11 @@ export default function App() {
     setState({ view: 'search' })
     setBuilderFeeMap(new Map())
     setEnrichmentDone(false)
+  }, [])
+
+  const handleShowData = useCallback(() => {
+    enrichCancelRef.current = true
+    setState({ view: 'data' })
   }, [])
 
   const handleRefresh = useCallback(() => {
@@ -142,7 +149,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-surface-0">
-      <Header onReset={handleReset} walletAddress={walletAddress} />
+      <Header onReset={handleReset} onShowData={handleShowData} activeView={state.view} walletAddress={walletAddress} />
 
       {state.view === 'search' && (
         <SearchPage onAnalyse={handleAnalyse} loading={false} />
@@ -167,6 +174,8 @@ export default function App() {
           onRefresh={handleRefresh}
         />
       )}
+
+      {state.view === 'data' && <DataPage />}
     </div>
   )
 }

@@ -3,10 +3,12 @@ import { LogOut } from 'lucide-react'
 
 interface HeaderProps {
   onReset?: () => void
+  onShowData?: () => void
+  activeView?: string
   walletAddress?: string
 }
 
-export function Header({ onReset, walletAddress }: HeaderProps) {
+export function Header({ onReset, onShowData, activeView, walletAddress }: HeaderProps) {
   const { ready, authenticated, login, logout } = usePrivy()
   const { wallets } = useWallets()
   const connectedAddress = wallets[0]?.address
@@ -35,12 +37,16 @@ export function Header({ onReset, walletAddress }: HeaderProps) {
           </button>
 
           <nav className="flex items-center gap-5">
-            <span className="text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
-              Trade
-            </span>
-            <span className="text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
-              Portfolio
-            </span>
+            <button
+              onClick={onShowData}
+              className={`text-sm transition-colors ${
+                activeView === 'data'
+                  ? 'text-text-primary border-b-2 border-accent-blue pb-0.5'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              Data
+            </button>
           </nav>
         </div>
 
