@@ -178,6 +178,8 @@ export async function getHistoricalOrders(address: string): Promise<HLHistorical
  * Fetch 1-minute candles for a coin over a time range.
  * The API caps at 5000 candles per request (~83 hours of 1-min candles).
  * For longer ranges, callers must page.
+ *
+ * Retries once on 429 (rate-limit) with a 1-second back-off.
  */
 export async function getCandles(
   coin: string,
@@ -185,9 +187,20 @@ export async function getCandles(
   endTime: number,
   interval = '1m',
 ): Promise<HLCandle[]> {
-  return post<HLCandle[]>('candleSnapshot', {
-    req: { coin, interval, startTime, endTime },
-  })
+  try {
+    return await post<HLCandle[]>('candleSnapshot', {
+      req: { coin, interval, startTime, endTime },
+    })
+  } catch (err) {
+    // Retry once on rate-limit (429) after a short back-off
+    if (err instanceof Error && err.message.includes('429')) {
+      await new Promise((r) => setTimeout(r, 1000))
+      return post<HLCandle[]>('candleSnapshot', {
+        req: { coin, interval, startTime, endTime },
+      })
+    }
+    throw err
+  }
 }
 
 /**

@@ -357,6 +357,10 @@ export async function analyseWallet(
   // intervalMs stored alongside each coin's candle map so the lookup and
   // estimator can use the correct step size (60_000 for 1m, 3_600_000 for 1h…)
   const candleIntervalMs = new Map<string, number>()
+  // 1d fallback maps: used when the primary candle window doesn't reach the
+  // oldest fill (e.g. ETH/SOL fills from Oct-Dec 2023, before HL's 4h window
+  // starts on Dec 19 2023; or HYPE fills from the first weeks after TGE).
+  const candleFallbackMaps = new Map<string, Map<number, HLCandle>>()
   let slippageCache: SlippageCache = {}
   const nowMs = Date.now()
 
@@ -371,29 +375,64 @@ export async function analyseWallet(
     //      4h  → ~833 days   (fills up to 2+ years old)
     //
     //    We always request endTime=now so HL populates the rolling window.
-    Promise.allSettled(
-      Array.from(coinGroups.entries())
-        .map(async ([coin, coinFills]) => {
-          const times = coinFills.map((f) => f.time)
-          const minT = arrayMin(times)
-          const ageMs = nowMs - minT
-          const { interval, intervalMs } = chooseCandleTier(ageMs)
-          // Resolve the correct ticker for the candle API
-          const candleTicker = spotCandleTickers.get(coin) ?? coin
-          try {
-            progress('Loading candles…', coin)
-            // startTime: well before the oldest fill so the window definitely
-            //   includes it. endTime: nowMs so HL returns its rolling window.
-            const candles = await getCandlesFull(candleTicker, minT - intervalMs * 2, nowMs, interval)
-            if (candles.length > 0) {
-              candleMaps.set(coin, buildCandleMap(candles))
-              candleIntervalMs.set(coin, intervalMs)
+    //
+    //    Concurrency limit: fire at most 2 candleSnapshot requests at once.
+    //    HL rate-limits (429) aggressively; 2 in parallel is safe and keeps
+    //    total load time reasonable for wallets with 200+ distinct coins.
+    //
+    //    Fallback: if the primary candle window doesn't reach the oldest fill
+    //    (e.g. ETH fills from HL's Oct 2023 launch pre-date the 4h window
+    //    that starts Dec 19 2023), we also fetch daily (1d) candles which
+    //    go back to 2020 for major coins.
+    (async () => {
+      const CONCURRENCY = 2
+      const entries = Array.from(coinGroups.entries())
+      // Process in batches of CONCURRENCY
+      for (let i = 0; i < entries.length; i += CONCURRENCY) {
+        const batch = entries.slice(i, i + CONCURRENCY)
+        await Promise.allSettled(
+          batch.map(async ([coin, coinFills]) => {
+            const times = coinFills.map((f) => f.time)
+            const minT = arrayMin(times)
+            const ageMs = nowMs - minT
+            const { interval, intervalMs } = chooseCandleTier(ageMs)
+            const candleTicker = spotCandleTickers.get(coin) ?? coin
+            try {
+              progress('Loading candles…', coin)
+              const candles = await getCandlesFull(candleTicker, minT - intervalMs * 2, nowMs, interval)
+              if (candles.length > 0) {
+                candleMaps.set(coin, buildCandleMap(candles))
+                candleIntervalMs.set(coin, intervalMs)
+
+                // Check if the oldest fill pre-dates the first candle returned.
+                // HL's rolling window means very early fills may fall before the
+                // candle history (e.g. Oct 2023 fills before 4h window Dec 2023).
+                // In that case, fetch daily candles as a fallback — they go back
+                // to 2020 for major coins and cover all of HL's history.
+                const firstCandleTime = candles.reduce((m, c) => Math.min(m, c.t), Infinity)
+                if (minT < firstCandleTime - intervalMs) {
+                  try {
+                    const dailyCandles = await getCandlesFull(
+                      candleTicker, minT - 86_400_000 * 2, nowMs, '1d',
+                    )
+                    if (dailyCandles.length > 0) {
+                      candleFallbackMaps.set(coin, buildCandleMap(dailyCandles))
+                    }
+                  } catch { /* non-fatal */ }
+                }
+              } else if (process.env.NODE_ENV !== 'production') {
+                console.warn(`[candle] empty result for ${coin} (ticker=${candleTicker}, interval=${interval}, ageMs=${ageMs})`)
+              }
+            } catch (err) {
+              // non-fatal: price-based metrics will be null for this coin
+              if (process.env.NODE_ENV !== 'production') {
+                console.warn(`[candle] fetch failed for ${coin}:`, err instanceof Error ? err.message : err)
+              }
             }
-          } catch {
-            // non-fatal: price-based metrics will be null for this coin
-          }
-        }),
-    ),
+          }),
+        )
+      }
+    })(),
 
     // 5: Hydromancer slippage cache (one request per unique perp coin×tier pair)
     (async () => {
@@ -412,7 +451,7 @@ export async function analyseWallet(
   // 6 ── Compute per-trade metrics ────────────────────────────────────────────
   progress('Computing execution metrics…')
   const tradeMetrics: TradeExecutionMetrics[] = recentFills.map((fill) =>
-    computeTradeMetrics(fill, fillTiers, fillHmKeys, candleMaps, candleIntervalMs, slippageCache, spotCoinNames, isSpotCoin, isHip3Coin, fill.dir),
+    computeTradeMetrics(fill, fillTiers, fillHmKeys, candleMaps, candleIntervalMs, candleFallbackMaps, slippageCache, spotCoinNames, isSpotCoin, isHip3Coin, fill.dir),
   )
 
   // 8 ── Cancel / trade ratio (windowed to fills time range) (fix #6) ────────
@@ -737,6 +776,7 @@ function computeTradeMetrics(
   fillHmKeys: Map<number, string>,
   candleMaps: Map<string, Map<number, HLCandle>>,
   candleIntervalMs: Map<string, number>,
+  candleFallbackMaps: Map<string, Map<number, HLCandle>>,
   slippageCache: SlippageCache,
   spotCoinNames: Map<string, string>,
   isSpotCoin: (coin: string, dir?: string) => boolean,
@@ -758,8 +798,9 @@ function computeTradeMetrics(
   let midPlus5: number | null = null
   let candleOpen: number | null = null
 
-  const cMap = candleMaps.get(fill.coin)
-  const iMs = candleIntervalMs.get(fill.coin) ?? 60_000  // default 1m
+  // Primary candle map (finest interval that covers the coin's fill history)
+  let cMap = candleMaps.get(fill.coin)
+  let iMs = candleIntervalMs.get(fill.coin) ?? 60_000  // default 1m
   if (cMap) {
     const candleAtTrade = findNearestCandle(cMap, fill.time, iMs, 10)
     if (candleAtTrade) {
@@ -770,6 +811,27 @@ function computeTradeMetrics(
     const fiveIntervalsMs = Math.max(5 * 60_000, 5 * iMs)
     const candle5 = findNearestCandle(cMap, fill.time + fiveIntervalsMs, iMs, 10)
     if (candle5) midPlus5 = candleMid(candle5)
+  }
+
+  // ── 1d fallback: for fills that predate the primary candle window ────────
+  // Example: ETH/SOL fills from Oct-Dec 2023 (HL launch) are before the 4h
+  // window that starts Dec 19 2023.  Daily candles go back to 2020 for major
+  // coins and cover the entire HL history.
+  if (midAtTrade === null) {
+    const fbMap = candleFallbackMaps.get(fill.coin)
+    if (fbMap) {
+      const DAY_MS = 86_400_000
+      const fbCandle = findNearestCandle(fbMap, fill.time, DAY_MS, 3)
+      if (fbCandle) {
+        midAtTrade = candleMid(fbCandle)
+        candleOpen = parseFloat(fbCandle.o)
+        const candle5fb = findNearestCandle(fbMap, fill.time + 5 * DAY_MS, DAY_MS, 3)
+        if (candle5fb) midPlus5 = candleMid(candle5fb)
+        // Switch cMap/iMs to fallback so estimateCandleSlippage uses 1d candles
+        cMap = fbMap
+        iMs = DAY_MS
+      }
+    }
   }
 
   // ── Slippage & spread from Hydromancer (fix #2, #3) ─────────────────────
@@ -844,11 +906,7 @@ function computeTradeMetrics(
   } else if (slippageSource !== 'hydromancer') {
     // Debug: log why candle path wasn't entered
     if (process.env.NODE_ENV !== 'production') {
-      console.debug(`[metrics] candle path skipped for ${fill.coin} tid=${fill.tid}`, {
-        midAtTrade,
-        hasCMap: !!cMap,
-        slippageSource,
-      })
+      console.debug(`[metrics] candle path skipped for ${fill.coin} tid=${fill.tid}: midAtTrade=${midAtTrade} hasCMap=${!!cMap} source=${slippageSource}`)
     }
   }
 
