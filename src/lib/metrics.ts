@@ -542,15 +542,20 @@ function estimateCandleSlippage(
     const c = cMap.get(snapped + i * intervalMs)
     if (c) candles.push(c)
   }
-  if (candles.length < 3) return NULL_RESULT
+  // Need at least 1 candle to estimate range; statistical estimators need ≥3
+  // but we have fallbacks (range, effective spread) that work with 1.
+  if (candles.length < 1) return NULL_RESULT
 
   // ── Best mid: interpolated for coarse candles (1h / 4h) ──────────────────
   // For 1-minute candles the typical price (O+H+L+C)/4 is fine.
   // For hourly / 4-hourly candles, a fill at minute 5 of the hour should not
   // be compared against the average of the full hour — interpolate O→C by
   // the fill's fractional position in the candle and blend with (H+L)/2.
+  //
+  // Use findNearestCandle to get the actual trade candle (not whatever was
+  // last pushed in the window loop, which may be a candle before the trade).
   let bestMid = midPx
-  const tradeCandle = candles[candles.length - 1]  // last collected = trade candle
+  const tradeCandle = findNearestCandle(cMap, tradeTime, intervalMs, 3) ?? candles[candles.length - 1]
   if (tradeCandle && intervalMs >= 3_600_000) {
     const duration = tradeCandle.T - tradeCandle.t + 1
     const frac = Math.max(0, Math.min(1, (tradeTime - tradeCandle.t) / duration))
@@ -641,6 +646,33 @@ function estimateCandleSlippage(
   let halfSpreadBps: number | null = null
   if (wTotal > 0) {
     halfSpreadBps = Math.max(0.01, wSum / wTotal)   // 0.01 bps minimum
+  }
+
+  // ── Fallback A: range-based estimate when all weighted estimators fail ────
+  // Happens in strongly trending markets (AR products all ≤0, CS α all ≤0,
+  // Roll covariance ≥0). Use the median H-L range across all available candles
+  // as a conservative minimum estimate. No √n denominator — this overstates
+  // spread slightly but guarantees we always return a value when data exists.
+  if (halfSpreadBps === null && candles.length >= 1) {
+    const rangeHalf = candles
+      .map((c) => {
+        const hi = parseFloat(c.h), lo = parseFloat(c.l), mid = (hi + lo) / 2
+        return mid > 0 && hi > lo ? (hi - lo) / 2 / mid * 10_000 : null
+      })
+      .filter((v): v is number => v !== null && v >= 0.01)
+    if (rangeHalf.length > 0) {
+      const sorted = [...rangeHalf].sort((a, b) => a - b)
+      halfSpreadBps = Math.max(0.01, sorted[Math.floor(sorted.length / 2)])
+    }
+  }
+
+  // ── Fallback B: effective spread from actual fill vs bestMid ─────────────
+  // When even the range fallback has nothing (e.g. all candles have H=L, i.e.
+  // a single-price candle), use |fillPx − bestMid| as a lower-bound spread.
+  // This is always computable and ensures takers get a slippage estimate.
+  if (halfSpreadBps === null && fillPx > 0 && bestMid > 0) {
+    const effHalf = Math.abs(fillPx - bestMid) / bestMid * 10_000
+    if (effHalf >= 0.01) halfSpreadBps = effHalf
   }
 
   // ── Almgren-Chriss (2001) market impact ──────────────────────────────────
@@ -797,6 +829,26 @@ function computeTradeMetrics(
       slippageBps = est.slippageBps
       additionalImpactBps = est.additionalImpactBps
       slippageSource = 'candle'
+    } else {
+      // Debug: log why we still have no estimate after candle fallback
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug(`[metrics] no estimate for ${fill.coin} tid=${fill.tid}`, {
+          midAtTrade,
+          cMapSize: cMap.size,
+          iMs,
+          fillPx,
+          time: new Date(fill.time).toISOString(),
+        })
+      }
+    }
+  } else if (slippageSource !== 'hydromancer') {
+    // Debug: log why candle path wasn't entered
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug(`[metrics] candle path skipped for ${fill.coin} tid=${fill.tid}`, {
+        midAtTrade,
+        hasCMap: !!cMap,
+        slippageSource,
+      })
     }
   }
 
