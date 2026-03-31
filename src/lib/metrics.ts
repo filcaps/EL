@@ -676,11 +676,28 @@ function estimateCandleSlippage(
   const csMed = median(csEstimates)
   const rangeMed = median(rangeEstimates)
 
+  // ── Interval correction for AR / CS / Roll ───────────────────────────────
+  // AR(2017), CS(2012) and Roll(1984) are calibrated for fine-grained data
+  // (≈1m for crypto).  For coarser intervals the intracandle price drift
+  // dominates the closing-price deviation from the H/L midpoint, inflating
+  // the spread signal by ≈√(intervalMs / 60_000).
+  //
+  // Empirically (HL BTC candles):
+  //   1m  → AR=0.90 bps  (ground truth)
+  //   1h  → AR=11.2 bps  (+12.5×  ≈ √60)
+  //   4h  → AR=22.2 bps  (+24.7×  ≈ √240)
+  //
+  // Multiplying by √(60_000/intervalMs) cancels the drift inflation and
+  // brings estimates back in line with 1m ground truth.
+  // Range/√n is NOT corrected — it already normalises by trade count and
+  // stays consistent across intervals (BTC: 0.14 bps 1m, 0.24 bps 4h).
+  const iCorrection = Math.sqrt(60_000 / intervalMs)   // 1.0 at 1m, 0.065 at 4h
+
   let wSum = 0, wTotal = 0
-  if (arMed    !== null) { wSum += 0.50 * arMed;    wTotal += 0.50 }
-  if (csMed    !== null) { wSum += 0.30 * csMed;    wTotal += 0.30 }
-  if (rollEst  !== null) { wSum += 0.15 * rollEst;  wTotal += 0.15 }
-  if (rangeMed !== null) { wSum += 0.05 * rangeMed; wTotal += 0.05 }
+  if (arMed    !== null) { wSum += 0.50 * arMed    * iCorrection; wTotal += 0.50 }
+  if (csMed    !== null) { wSum += 0.30 * csMed    * iCorrection; wTotal += 0.30 }
+  if (rollEst  !== null) { wSum += 0.15 * rollEst  * iCorrection; wTotal += 0.15 }
+  if (rangeMed !== null) { wSum += 0.05 * rangeMed;               wTotal += 0.05 }
 
   let halfSpreadBps: number | null = null
   if (wTotal > 0) {
@@ -689,14 +706,13 @@ function estimateCandleSlippage(
 
   // ── Fallback A: range-based estimate when all weighted estimators fail ────
   // Happens in strongly trending markets (AR products all ≤0, CS α all ≤0,
-  // Roll covariance ≥0). Use the median H-L range across all available candles
-  // as a conservative minimum estimate. No √n denominator — this overstates
-  // spread slightly but guarantees we always return a value when data exists.
+  // Roll covariance ≥0). Use the median H-L range/2 across candles, scaled
+  // by the same interval correction so coarse candles don't over-estimate.
   if (halfSpreadBps === null && candles.length >= 1) {
     const rangeHalf = candles
       .map((c) => {
         const hi = parseFloat(c.h), lo = parseFloat(c.l), mid = (hi + lo) / 2
-        return mid > 0 && hi > lo ? (hi - lo) / 2 / mid * 10_000 : null
+        return mid > 0 && hi > lo ? (hi - lo) / 2 / mid * 10_000 * iCorrection : null
       })
       .filter((v): v is number => v !== null && v >= 0.01)
     if (rangeHalf.length > 0) {
@@ -911,8 +927,12 @@ function computeTradeMetrics(
   }
 
   // ── Derived metrics ──────────────────────────────────────────────────────
+  // Effective spread requires an accurate mid-price estimate.  For 1h/4h/1d
+  // candles the interpolated mid can be 20-100+ bps away from the true mid
+  // (intracandle drift swamps the spread), producing meaningless large values.
+  // Only compute it for 1m candles where the mid estimate is reliable.
   const effSpread =
-    midAtTrade !== null ? effectiveSpreadBps(fillPx, midAtTrade) : null
+    midAtTrade !== null && iMs <= 60_000 ? effectiveSpreadBps(fillPx, midAtTrade) : null
 
   const realSpread =
     midAtTrade !== null && midPlus5 !== null
