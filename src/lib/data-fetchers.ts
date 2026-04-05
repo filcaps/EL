@@ -53,6 +53,8 @@ export async function getHip3Volumes(): Promise<Hip3VolumeEntry[]> {
 
 // ─── Dune: HIP-3 vs Hyperliquid volume ─────────────────────────────────────
 
+const DUNE_CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours
+
 export interface DuneVolumeRow {
   date: string
   cryptoVolume: number
@@ -60,6 +62,16 @@ export interface DuneVolumeRow {
 }
 
 export async function fetchDuneHip3VsHl(queryId: string): Promise<DuneVolumeRow[]> {
+  // Check localStorage cache first
+  const cacheKey = `dune_${queryId}`
+  try {
+    const cached = localStorage.getItem(cacheKey)
+    if (cached) {
+      const { data, ts } = JSON.parse(cached) as { data: DuneVolumeRow[]; ts: number }
+      if (Date.now() - ts < DUNE_CACHE_TTL) return data
+    }
+  } catch { /* ignore corrupt cache */ }
+
   const apiKey = import.meta.env.VITE_DUNE_API_KEY
   if (!apiKey) throw new Error('VITE_DUNE_API_KEY not set')
 
@@ -86,9 +98,16 @@ export async function fetchDuneHip3VsHl(queryId: string): Promise<DuneVolumeRow[
     else if (r.category === 'HIP-3') entry.hip3 = r.daily_usd_volume as number
   }
 
-  return Array.from(byDate.entries())
+  const result = Array.from(byDate.entries())
     .map(([date, v]) => ({ date, cryptoVolume: v.crypto, hip3Volume: v.hip3 }))
     .sort((a, b) => a.date.localeCompare(b.date))
+
+  // Persist to localStorage
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify({ data: result, ts: Date.now() }))
+  } catch { /* storage full — ignore */ }
+
+  return result
 }
 
 // ─── Curated Token Unlocks ──────────────────────────────────────────────────

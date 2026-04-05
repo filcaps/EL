@@ -18,8 +18,8 @@ export default {
           bright: '#2a2a2a',
         },
         text: {
-          primary: '#ffffff',
-          secondary: '#888888',
+          primary: '#fafffd',
+          secondary: '#c4c4c4',
           muted: '#555555',
           dim: '#333333',
         },

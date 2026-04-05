@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   BarChart,
   Bar,
@@ -9,7 +9,8 @@ import {
   CartesianGrid,
 } from 'recharts'
 import { format } from 'date-fns'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Camera } from 'lucide-react'
+import html2canvas from 'html2canvas'
 import { getTopMarkets, type CoinMarket } from '../lib/coingecko'
 import {
   getOpenInterestMap,
@@ -36,11 +37,25 @@ function isStale<T>(c: Cached<T>, maxAge: number): boolean {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
+async function saveAsImage(el: HTMLElement | null, filename: string) {
+  if (!el) return
+  const canvas = await html2canvas(el, { backgroundColor: '#0a0a0a', scale: 2 })
+  const link = document.createElement('a')
+  link.download = `${filename}.png`
+  link.href = canvas.toDataURL('image/png')
+  link.click()
+}
+
 export function DataPage() {
   const [markets, setMarkets] = useState<Cached<CoinMarket[]>>({ data: null, fetchedAt: 0 })
   const [oiMap, setOiMap] = useState<Cached<Map<string, number>>>({ data: null, fetchedAt: 0 })
   const [dune, setDune] = useState<Cached<DuneVolumeRow[]>>({ data: null, fetchedAt: 0 })
   const [loading, setLoading] = useState(true)
+
+  const topAssetsRef = useRef<HTMLElement>(null)
+  const tokenUnlocksRef = useRef<HTMLElement>(null)
+  const hip3VolumeRef = useRef<HTMLElement>(null)
+  const hip3VsHlRef = useRef<HTMLElement>(null)
 
   const fetchAll = useCallback(async (force = false) => {
     setLoading(true)
@@ -93,14 +108,10 @@ export function DataPage() {
       </div>
 
       {/* ── Section 1: Top 10 Crypto Assets ─────────────────────────────────── */}
-      <section className="card">
+      <section className="card" ref={topAssetsRef}>
         <div className="card-header">
           <span className="card-title">Top 10 Crypto Assets</span>
-          {markets.fetchedAt > 0 && (
-            <span className="text-[10px] text-text-dim">
-              Updated {format(new Date(markets.fetchedAt), 'MMM d, HH:mm')}
-            </span>
-          )}
+          <SaveButton onClick={() => saveAsImage(topAssetsRef.current, 'top-10-crypto')} />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -130,14 +141,16 @@ export function DataPage() {
       </section>
 
       {/* ── Section 2: Top Token Unlocks ─────────────────────────────────────── */}
-      <section className="card">
+      <section className="card" ref={tokenUnlocksRef}>
         <div className="card-header">
           <span className="card-title">Upcoming Token Unlocks</span>
+          <SaveButton onClick={() => saveAsImage(tokenUnlocksRef.current, 'token-unlocks')} />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr>
+                <th className="th w-10">#</th>
                 <th className="th">Token</th>
                 <th className="th text-right">Unlock Date</th>
                 <th className="th text-right">Amount</th>
@@ -146,8 +159,9 @@ export function DataPage() {
               </tr>
             </thead>
             <tbody>
-              {CURATED_UNLOCKS.map((u) => (
+              {CURATED_UNLOCKS.map((u, i) => (
                 <tr key={u.symbol} className="table-row-hover">
+                  <td className="td text-text-muted">{i + 1}</td>
                   <td className="td-primary">
                     <div className="flex items-center gap-2">
                       <img src={u.logo} alt={u.token} className="w-5 h-5 rounded-full" />
@@ -167,8 +181,11 @@ export function DataPage() {
       </section>
 
       {/* ── Section 3: HIP-3 All-Time Volume ─────────────────────────────── */}
-      <section className="card">
-        <div className="p-6">
+      <section className="card" ref={hip3VolumeRef}>
+        <div className="flex justify-end px-5 pt-4">
+          <SaveButton onClick={() => saveAsImage(hip3VolumeRef.current, 'hip3-all-time-volume')} />
+        </div>
+        <div className="p-6 pt-0">
           {dune.data && dune.data.length > 0 ? (
             <Hip3AllTimeVolume data={dune.data} />
           ) : dune.error ? (
@@ -182,14 +199,10 @@ export function DataPage() {
       </section>
 
       {/* ── Section 4: HIP-3 vs Hyperliquid Volume ──────────────────────────── */}
-      <section className="card">
+      <section className="card" ref={hip3VsHlRef}>
         <div className="card-header">
           <span className="card-title">HIP-3 vs Hyperliquid Volume</span>
-          {dune.fetchedAt > 0 && (
-            <span className="text-[10px] text-text-dim">
-              Updated {format(new Date(dune.fetchedAt), 'MMM d, HH:mm')}
-            </span>
-          )}
+          <SaveButton onClick={() => saveAsImage(hip3VsHlRef.current, 'hip3-vs-hyperliquid')} />
         </div>
         <div className="p-4 h-96">
           {dune.data && dune.data.length > 0 ? (
@@ -242,29 +255,10 @@ function MarketRow({
   )
 }
 
-type TimePeriod = '24h' | '7d' | 'all'
-
 function Hip3AllTimeVolume({ data }: { data: DuneVolumeRow[] }) {
-  const [period, setPeriod] = useState<TimePeriod>('all')
-
   const allTimeTotal = useMemo(
     () => data.reduce((sum, d) => sum + d.hip3Volume, 0),
     [data],
-  )
-
-  const filteredData = useMemo(() => {
-    if (period === 'all') return data
-    const now = new Date(data[data.length - 1]?.date ?? Date.now())
-    const cutoff = new Date(now)
-    if (period === '24h') cutoff.setDate(cutoff.getDate() - 1)
-    else if (period === '7d') cutoff.setDate(cutoff.getDate() - 7)
-    const cutoffStr = cutoff.toISOString().slice(0, 10)
-    return data.filter((d) => d.date >= cutoffStr)
-  }, [data, period])
-
-  const periodTotal = useMemo(
-    () => filteredData.reduce((sum, d) => sum + d.hip3Volume, 0),
-    [filteredData],
   )
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -280,12 +274,6 @@ function Hip3AllTimeVolume({ data }: { data: DuneVolumeRow[] }) {
     )
   }
 
-  const periods: { key: TimePeriod; label: string }[] = [
-    { key: '24h', label: '24H' },
-    { key: '7d', label: '7D' },
-    { key: 'all', label: 'All Time' },
-  ]
-
   return (
     <div>
       {/* Header */}
@@ -294,29 +282,13 @@ function Hip3AllTimeVolume({ data }: { data: DuneVolumeRow[] }) {
           All-Time HIP-3 Volume
         </div>
         <div className="text-4xl font-semibold text-text-primary font-mono tracking-tight">
-          {fmtCompact(period === 'all' ? allTimeTotal : periodTotal)}
-        </div>
-        {/* Period toggle */}
-        <div className="flex items-center justify-center gap-2 mt-4">
-          {periods.map((p) => (
-            <button
-              key={p.key}
-              onClick={() => setPeriod(p.key)}
-              className={`px-4 py-1.5 text-xs font-medium rounded border transition-colors ${
-                period === p.key
-                  ? 'border-text-secondary text-text-primary bg-surface-3'
-                  : 'border-border text-text-muted hover:text-text-secondary hover:border-border-bright'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
+          {fmtCompact(allTimeTotal)}
         </div>
       </div>
       {/* Chart */}
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={filteredData} margin={{ top: 4, right: 40, bottom: 0, left: 8 }} barCategoryGap={1}>
+          <BarChart data={data} margin={{ top: 4, right: 40, bottom: 0, left: 8 }} barCategoryGap={1}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
             <XAxis
               dataKey="date"
@@ -394,48 +366,74 @@ function DuneVolumeChart({ data }: { data: DuneVolumeRow[] }) {
   }
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={pctData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }} barCategoryGap={0} barGap={0}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
-        <XAxis
-          dataKey="date"
-          tickFormatter={(v) => {
-            const d = new Date(v)
-            return `${format(d, 'MMM')} ${ordinal(d.getDate())}`
-          }}
-          tick={{ fill: '#555', fontSize: 11 }}
-          axisLine={false}
-          tickLine={false}
-          minTickGap={60}
-        />
-        <YAxis
-          domain={[0, 100]}
-          ticks={[0, 50, 100]}
-          tickFormatter={(v) => `${v}%`}
-          tick={{ fill: '#555', fontSize: 11 }}
-          axisLine={false}
-          tickLine={false}
-          width={40}
-        />
-        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-        <Bar
-          dataKey="hip3Pct"
-          name="HIP-3"
-          stackId="pct"
-          fill="#6EE7B7"
-          radius={[0, 0, 0, 0]}
-        />
-        <Bar
-          dataKey="cryptoPct"
-          name="Hyperliquid"
-          stackId="pct"
-          fill="#1c1c1c"
-          stroke="#333"
-          strokeWidth={0.5}
-          radius={[0, 0, 0, 0]}
-        />
-      </BarChart>
-    </ResponsiveContainer>
+    <div className="flex flex-col h-full">
+      <div className="flex-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={pctData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }} barCategoryGap={0} barGap={0}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
+            <XAxis
+              dataKey="date"
+              tickFormatter={(v) => {
+                const d = new Date(v)
+                return `${format(d, 'MMM')} ${ordinal(d.getDate())}`
+              }}
+              tick={{ fill: '#555', fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+              minTickGap={60}
+            />
+            <YAxis
+              domain={[0, 100]}
+              ticks={[0, 50, 100]}
+              tickFormatter={(v) => `${v}%`}
+              tick={{ fill: '#555', fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+              width={40}
+            />
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+            <Bar
+              dataKey="hip3Pct"
+              name="HIP-3"
+              stackId="pct"
+              fill="#6EE7B7"
+              radius={[0, 0, 0, 0]}
+            />
+            <Bar
+              dataKey="cryptoPct"
+              name="Hyperliquid"
+              stackId="pct"
+              fill="#1c1c1c"
+              stroke="#333"
+              strokeWidth={0.5}
+              radius={[0, 0, 0, 0]}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex items-center justify-center gap-4 pt-3 text-[11px] text-text-muted">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#6EE7B7' }} />
+          HIP-3
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2.5 h-2.5 rounded-sm border border-[#333]" style={{ backgroundColor: '#1c1c1c' }} />
+          Hyperliquid
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function SaveButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="btn-ghost flex items-center gap-1 text-[10px] text-text-muted hover:text-text-secondary"
+      title="Save as image"
+    >
+      <Camera className="w-3.5 h-3.5" />
+    </button>
   )
 }
 
