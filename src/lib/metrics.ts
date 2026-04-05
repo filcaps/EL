@@ -724,10 +724,15 @@ function estimateCandleSlippage(
   // ── Fallback B: effective spread from actual fill vs bestMid ─────────────
   // When even the range fallback has nothing (e.g. all candles have H=L, i.e.
   // a single-price candle), use |fillPx − bestMid| as a lower-bound spread.
-  // This is always computable and ensures takers get a slippage estimate.
+  // Guard: only valid when bestMid is within 2× of fillPx — if the candle
+  // mid is more than 2× away from the fill price the candle is stale/wrong
+  // (e.g. a meme coin that 10×'d since the nearest candle).
   if (halfSpreadBps === null && fillPx > 0 && bestMid > 0) {
-    const effHalf = Math.abs(fillPx - bestMid) / bestMid * 10_000
-    if (effHalf >= 0.01) halfSpreadBps = effHalf
+    const midRatioFB = Math.max(fillPx, bestMid) / Math.min(fillPx, bestMid)
+    if (midRatioFB <= 2) {
+      const effHalf = Math.abs(fillPx - bestMid) / bestMid * 10_000
+      if (effHalf >= 0.01) halfSpreadBps = effHalf
+    }
   }
 
   // ── Almgren-Chriss (2001) market impact ──────────────────────────────────
@@ -769,8 +774,13 @@ function estimateCandleSlippage(
 
   if (isTaker) {
     const sign = side === 'buy' ? 1 : -1
-    // Implementation shortfall: how much worse than mid the fill was
-    const IS = sign * (fillPx - bestMid) / bestMid * 10_000
+    // Implementation shortfall: how much worse than mid the fill was.
+    // Only valid when bestMid is close to the actual fill price.  For meme
+    // coins with large intraday moves the nearest candle may be several
+    // intervals away with a price 10–100× different — in that case IS is
+    // noise, not signal.  Gate on ≤2× price ratio between fill and candle mid.
+    const midRatio = bestMid > 0 ? Math.max(fillPx, bestMid) / Math.min(fillPx, bestMid) : Infinity
+    const IS = midRatio <= 2 ? sign * (fillPx - bestMid) / bestMid * 10_000 : 0
     const modelSlippage = halfSpreadBps !== null ? halfSpreadBps + impactBps : 0
     const floor = halfSpreadBps ?? 0
     // Take the largest of: spread floor, observed IS, model prediction

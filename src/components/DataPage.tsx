@@ -7,18 +7,15 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
-  Legend,
 } from 'recharts'
 import { format } from 'date-fns'
 import { RefreshCw } from 'lucide-react'
 import { getTopMarkets, type CoinMarket } from '../lib/coingecko'
 import {
   getOpenInterestMap,
-  getHip3Volumes,
   fetchDuneHip3VsHl,
   CURATED_UNLOCKS,
   fmtCompact,
-  type Hip3VolumeEntry,
   type DuneVolumeRow,
 } from '../lib/data-fetchers'
 
@@ -42,7 +39,6 @@ function isStale<T>(c: Cached<T>, maxAge: number): boolean {
 export function DataPage() {
   const [markets, setMarkets] = useState<Cached<CoinMarket[]>>({ data: null, fetchedAt: 0 })
   const [oiMap, setOiMap] = useState<Cached<Map<string, number>>>({ data: null, fetchedAt: 0 })
-  const [hip3, setHip3] = useState<Cached<Hip3VolumeEntry[]>>({ data: null, fetchedAt: 0 })
   const [dune, setDune] = useState<Cached<DuneVolumeRow[]>>({ data: null, fetchedAt: 0 })
   const [loading, setLoading] = useState(true)
 
@@ -62,15 +58,6 @@ export function DataPage() {
         getOpenInterestMap()
           .then((data) => setOiMap({ data, fetchedAt: Date.now() }))
           .catch((e) => setOiMap((prev) => ({ ...prev, error: e.message }))),
-      )
-    }
-
-    // HIP-3 volumes (6h cache)
-    if (force || isStale(hip3, MARKET_STALE_MS)) {
-      jobs.push(
-        getHip3Volumes()
-          .then((data) => setHip3({ data, fetchedAt: Date.now() }))
-          .catch((e) => setHip3((prev) => ({ ...prev, error: e.message }))),
       )
     }
 
@@ -162,8 +149,11 @@ export function DataPage() {
               {CURATED_UNLOCKS.map((u) => (
                 <tr key={u.symbol} className="table-row-hover">
                   <td className="td-primary">
-                    <span className="font-sans">{u.token}</span>{' '}
-                    <span className="text-text-muted text-xs">{u.symbol}</span>
+                    <div className="flex items-center gap-2">
+                      <img src={u.logo} alt={u.token} className="w-5 h-5 rounded-full" />
+                      <span className="font-sans">{u.token}</span>
+                      <span className="text-text-muted text-xs">{u.symbol}</span>
+                    </div>
                   </td>
                   <td className="td text-right">{format(new Date(u.unlockDate), 'MMM d, yyyy')}</td>
                   <td className="td text-right">{u.amountLabel}</td>
@@ -176,24 +166,16 @@ export function DataPage() {
         </div>
       </section>
 
-      {/* ── Section 3: HIP-3 Volume Bar Chart ───────────────────────────────── */}
+      {/* ── Section 3: HIP-3 All-Time Volume ─────────────────────────────── */}
       <section className="card">
-        <div className="card-header">
-          <span className="card-title">HIP-3 24h Volume by Asset</span>
-          {hip3.fetchedAt > 0 && (
-            <span className="text-[10px] text-text-dim">
-              Updated {format(new Date(hip3.fetchedAt), 'MMM d, HH:mm')}
-            </span>
-          )}
-        </div>
-        <div className="p-4 h-80">
-          {hip3.data && hip3.data.length > 0 ? (
-            <Hip3VolumeChart data={hip3.data} />
-          ) : hip3.error ? (
-            <ErrorNote msg={hip3.error} />
+        <div className="p-6">
+          {dune.data && dune.data.length > 0 ? (
+            <Hip3AllTimeVolume data={dune.data} />
+          ) : dune.error ? (
+            <ErrorNote msg={dune.error} />
           ) : (
-            <div className="flex items-center justify-center h-full text-text-muted text-sm">
-              {loading ? 'Loading HIP-3 volume…' : 'No HIP-3 volume data'}
+            <div className="flex items-center justify-center h-80 text-text-muted text-sm">
+              {loading ? 'Loading volume data…' : 'No volume data'}
             </div>
           )}
         </div>
@@ -260,69 +242,151 @@ function MarketRow({
   )
 }
 
-function Hip3VolumeChart({ data }: { data: Hip3VolumeEntry[] }) {
-  // Take top 20 for readability
-  const chartData = useMemo(() => data.slice(0, 20), [data])
+type TimePeriod = '24h' | '7d' | 'all'
+
+function Hip3AllTimeVolume({ data }: { data: DuneVolumeRow[] }) {
+  const [period, setPeriod] = useState<TimePeriod>('all')
+
+  const allTimeTotal = useMemo(
+    () => data.reduce((sum, d) => sum + d.hip3Volume, 0),
+    [data],
+  )
+
+  const filteredData = useMemo(() => {
+    if (period === 'all') return data
+    const now = new Date(data[data.length - 1]?.date ?? Date.now())
+    const cutoff = new Date(now)
+    if (period === '24h') cutoff.setDate(cutoff.getDate() - 1)
+    else if (period === '7d') cutoff.setDate(cutoff.getDate() - 7)
+    const cutoffStr = cutoff.toISOString().slice(0, 10)
+    return data.filter((d) => d.date >= cutoffStr)
+  }, [data, period])
+
+  const periodTotal = useMemo(
+    () => filteredData.reduce((sum, d) => sum + d.hip3Volume, 0),
+    [filteredData],
+  )
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null
     return (
       <div className="bg-surface-3 border border-border rounded-lg px-3 py-2 text-xs">
-        <div className="text-text-primary font-medium mb-1">{label}</div>
+        <div className="text-text-muted mb-1">{format(new Date(label), 'MMM d, yyyy')}</div>
         <div className="text-text-secondary">
-          24h Volume: <span className="text-text-primary font-mono">{fmtCompact(payload[0].value)}</span>
+          Volume: <span className="font-mono" style={{ color: '#6EE7B7' }}>{fmtCompact(payload[0].value)}</span>
         </div>
       </div>
     )
   }
 
+  const periods: { key: TimePeriod; label: string }[] = [
+    { key: '24h', label: '24H' },
+    { key: '7d', label: '7D' },
+    { key: 'all', label: 'All Time' },
+  ]
+
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
-        <XAxis
-          dataKey="coin"
-          tick={{ fill: '#555', fontSize: 10 }}
-          axisLine={false}
-          tickLine={false}
-          interval={0}
-          angle={-45}
-          textAnchor="end"
-          height={60}
-        />
-        <YAxis
-          tickFormatter={(v) => fmtCompact(v)}
-          tick={{ fill: '#555', fontSize: 11 }}
-          axisLine={false}
-          tickLine={false}
-          width={64}
-        />
-        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-        <Bar dataKey="volume24h" fill="#235051" radius={[3, 3, 0, 0]} maxBarSize={40} />
-      </BarChart>
-    </ResponsiveContainer>
+    <div>
+      {/* Header */}
+      <div className="text-center mb-6">
+        <div className="card-title mb-3">
+          All-Time HIP-3 Volume
+        </div>
+        <div className="text-4xl font-semibold text-text-primary font-mono tracking-tight">
+          {fmtCompact(period === 'all' ? allTimeTotal : periodTotal)}
+        </div>
+        {/* Period toggle */}
+        <div className="flex items-center justify-center gap-2 mt-4">
+          {periods.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setPeriod(p.key)}
+              className={`px-4 py-1.5 text-xs font-medium rounded border transition-colors ${
+                period === p.key
+                  ? 'border-text-secondary text-text-primary bg-surface-3'
+                  : 'border-border text-text-muted hover:text-text-secondary hover:border-border-bright'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {/* Chart */}
+      <div className="h-72">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={filteredData} margin={{ top: 4, right: 40, bottom: 0, left: 8 }} barCategoryGap={1}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
+            <XAxis
+              dataKey="date"
+              tickFormatter={(v) => format(new Date(v), 'MMM d')}
+              tick={{ fill: '#555', fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+              minTickGap={50}
+            />
+            <YAxis
+              tickFormatter={(v) => fmtCompact(v)}
+              tick={{ fill: '#555', fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+              width={0}
+              orientation="right"
+              mirror
+            />
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+            <Bar dataKey="hip3Volume" fill="#6EE7B7" radius={[2, 2, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   )
 }
 
 function DuneVolumeChart({ data }: { data: DuneVolumeRow[] }) {
+  // Convert to 100% stacked percentages
+  const pctData = useMemo(
+    () =>
+      data.map((d) => {
+        const total = d.cryptoVolume + d.hip3Volume
+        if (total === 0) return { ...d, hip3Pct: 0, cryptoPct: 100 }
+        return {
+          ...d,
+          hip3Pct: (d.hip3Volume / total) * 100,
+          cryptoPct: (d.cryptoVolume / total) * 100,
+        }
+      }),
+    [data],
+  )
+
+  // Date suffix helper: 1st, 2nd, 3rd, 4th…
+  function ordinal(day: number): string {
+    if (day >= 11 && day <= 13) return `${day}th`
+    const last = day % 10
+    if (last === 1) return `${day}st`
+    if (last === 2) return `${day}nd`
+    if (last === 3) return `${day}rd`
+    return `${day}th`
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null
-    const crypto = payload.find((p: any) => p.dataKey === 'cryptoVolume')?.value ?? 0
-    const hip3 = payload.find((p: any) => p.dataKey === 'hip3Volume')?.value ?? 0
+    const row = data.find((d) => d.date === label)
+    const hip3Pct = payload.find((p: any) => p.dataKey === 'hip3Pct')?.value ?? 0
     return (
       <div className="bg-surface-3 border border-border rounded-lg px-3 py-2 text-xs">
-        <div className="text-text-muted mb-1.5">{label}</div>
+        <div className="text-text-muted mb-1.5">
+          {format(new Date(label), 'MMM')} {ordinal(new Date(label).getDate())}
+        </div>
         <div className="space-y-0.5">
           <div className="text-text-secondary">
-            Crypto: <span className="text-text-primary font-mono">{fmtCompact(crypto)}</span>
+            Hyperliquid: <span className="text-text-primary font-mono">{row ? fmtCompact(row.cryptoVolume) : '—'}</span>
           </div>
           <div className="text-text-secondary">
-            HIP-3: <span className="text-accent-purple font-mono">{fmtCompact(hip3)}</span>
-          </div>
-          <div className="text-text-secondary">
-            Total: <span className="text-text-primary font-mono">{fmtCompact(crypto + hip3)}</span>
+            HIP-3: <span className="font-mono" style={{ color: '#6EE7B7' }}>{row ? fmtCompact(row.hip3Volume) : '—'}</span>
+            <span className="text-text-muted ml-1">({hip3Pct.toFixed(1)}%)</span>
           </div>
         </div>
       </div>
@@ -331,52 +395,44 @@ function DuneVolumeChart({ data }: { data: DuneVolumeRow[] }) {
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
-        <defs>
-          <linearGradient id="cryptoBarGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#235051" stopOpacity={0.9} />
-            <stop offset="100%" stopColor="#235051" stopOpacity={0.6} />
-          </linearGradient>
-          <linearGradient id="hip3BarGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.9} />
-            <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0.6} />
-          </linearGradient>
-        </defs>
+      <BarChart data={pctData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }} barCategoryGap={0} barGap={0}>
         <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
         <XAxis
           dataKey="date"
-          tickFormatter={(v) => format(new Date(v), 'MMM d')}
+          tickFormatter={(v) => {
+            const d = new Date(v)
+            return `${format(d, 'MMM')} ${ordinal(d.getDate())}`
+          }}
           tick={{ fill: '#555', fontSize: 11 }}
           axisLine={false}
           tickLine={false}
-          minTickGap={40}
+          minTickGap={60}
         />
         <YAxis
-          tickFormatter={(v) => fmtCompact(v)}
+          domain={[0, 100]}
+          ticks={[0, 50, 100]}
+          tickFormatter={(v) => `${v}%`}
           tick={{ fill: '#555', fontSize: 11 }}
           axisLine={false}
           tickLine={false}
-          width={64}
+          width={40}
         />
         <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-        <Legend
-          wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-          iconType="square"
-          iconSize={10}
-        />
         <Bar
-          dataKey="cryptoVolume"
-          name="Crypto"
-          stackId="vol"
-          fill="url(#cryptoBarGrad)"
+          dataKey="hip3Pct"
+          name="HIP-3"
+          stackId="pct"
+          fill="#6EE7B7"
           radius={[0, 0, 0, 0]}
         />
         <Bar
-          dataKey="hip3Volume"
-          name="HIP-3"
-          stackId="vol"
-          fill="url(#hip3BarGrad)"
-          radius={[3, 3, 0, 0]}
+          dataKey="cryptoPct"
+          name="Hyperliquid"
+          stackId="pct"
+          fill="#1c1c1c"
+          stroke="#333"
+          strokeWidth={0.5}
+          radius={[0, 0, 0, 0]}
         />
       </BarChart>
     </ResponsiveContainer>

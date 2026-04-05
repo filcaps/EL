@@ -97,6 +97,7 @@ export async function fetchDuneHip3VsHl(queryId: string): Promise<DuneVolumeRow[
 export interface TokenUnlock {
   token: string
   symbol: string
+  logo: string         // URL to coin icon
   unlockDate: string   // ISO date e.g. "2026-04-15"
   amountLabel: string  // e.g. "$1.2B"
   percentOfSupply: number
@@ -107,6 +108,7 @@ export const CURATED_UNLOCKS: TokenUnlock[] = [
   {
     token: 'Solana',
     symbol: 'SOL',
+    logo: 'https://assets.coingecko.com/coins/images/4128/small/solana.png',
     unlockDate: '2026-04-07',
     amountLabel: '$1.5B',
     percentOfSupply: 2.3,
@@ -115,6 +117,7 @@ export const CURATED_UNLOCKS: TokenUnlock[] = [
   {
     token: 'Sui',
     symbol: 'SUI',
+    logo: 'https://assets.coingecko.com/coins/images/26375/small/sui-ocean-square.png',
     unlockDate: '2026-04-01',
     amountLabel: '$260M',
     percentOfSupply: 2.67,
@@ -123,6 +126,7 @@ export const CURATED_UNLOCKS: TokenUnlock[] = [
   {
     token: 'Aptos',
     symbol: 'APT',
+    logo: 'https://assets.coingecko.com/coins/images/26455/small/aptos_round.png',
     unlockDate: '2026-04-12',
     amountLabel: '$69M',
     percentOfSupply: 1.87,
@@ -131,6 +135,7 @@ export const CURATED_UNLOCKS: TokenUnlock[] = [
   {
     token: 'Arbitrum',
     symbol: 'ARB',
+    logo: 'https://assets.coingecko.com/coins/images/16547/small/arb.jpg',
     unlockDate: '2026-04-16',
     amountLabel: '$42M',
     percentOfSupply: 2.13,
@@ -139,6 +144,7 @@ export const CURATED_UNLOCKS: TokenUnlock[] = [
   {
     token: 'Worldcoin',
     symbol: 'WLD',
+    logo: 'https://assets.coingecko.com/coins/images/31069/small/worldcoin.jpeg',
     unlockDate: '2026-04-23',
     amountLabel: '$37M',
     percentOfSupply: 1.52,
